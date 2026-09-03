@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>CONFLUENCE · desk</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Instrument+Serif:ital@0;1&family=Schibsted+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="desk.css" />
+</head>
+<body class="view-desk">
+  <div class="app">
+    <header class="top">
+      <div class="brand"><span class="dot" id="feedDot"></span> CONFLUENCE</div>
+      <nav class="nav">
+        <button class="navb on" data-view="desk">Desk</button>
+        <button class="navb" data-view="ops">Paper <span class="badge" id="opsBadge">0</span></button>
+        <button class="navb" data-view="cfg">Config</button>
+      </nav>
+      <span class="chip" id="feedChip">conectando</span>
+      <span class="chip" id="lagChip">lat —</span>
+      <button class="chip on" data-chain="solana" id="chSol">solana</button>
+      <button class="chip" data-chain="base" id="chBase">base</button>
+      <div class="grow"></div>
+      <button class="chip" id="resetLayout" title="resetear paneles">reset layout</button>
+      <div class="eq" data-view="ops" title="abrir paper">
+        <span>equity <b id="eq">$1,000</b></span>
+        <span>cash <b id="cash">$1,000</b></span>
+        <span>uPnL <b id="upnl">$0</b></span>
+        <span>fees <b id="fees">$0</b></span>
+      </div>
+    </header>
+
+    <div class="view on" id="view-desk">
+      <div class="workspace" id="shell">
+        <div class="slot" id="slot-a">
+          <aside class="col" id="colWatch" data-panel="watch">
+            <div class="hd" draggable="true" data-drag="watch">
+              <span class="grab">⋮⋮</span> Watchlist · <span id="watchN">0</span>
+              <button class="icon" data-collapse="colWatch" type="button">–</button>
+            </div>
+            <form class="follow" id="followForm">
+              <input name="handle" placeholder="@handle o fomo.family/profile/…" autocomplete="off" />
+              <button class="btn" type="submit">seguir</button>
+            </form>
+            <div class="note" id="econoarNote"><b>Scout encontró a eric.eth.</b></div>
+            <div class="scroll" id="watch"></div>
+          </aside>
+        </div>
+        <div class="gutter" data-split="lr" title="arrastrá para agrandar"></div>
+        <div class="mid" id="colCenter">
+          <div class="slot" id="slot-b">
+            <section class="col" id="colRadar" data-panel="radar">
+              <div class="hd" draggable="true" data-drag="radar">
+                <span class="grab">⋮⋮</span> Radar
+                <button class="icon" data-collapse="colRadar" type="button">–</button>
+              </div>
+              <div class="scroll" id="cards"></div>
+            </section>
+          </div>
+          <div class="gutter gutter-v" data-split="tb" title="arrastrá"></div>
+          <div class="slot" id="slot-c">
+            <section class="col" id="colTape" data-panel="tape">
+              <div class="hd" draggable="true" data-drag="tape">
+                <span class="grab">⋮⋮</span> Tape
+                <button class="icon" data-collapse="colTape" type="button">–</button>
+              </div>
+              <div class="scroll" id="tape"></div>
+            </section>
+          </div>
+        </div>
+        <div class="gutter" data-split="rr" title="arrastrá"></div>
+        <div class="slot" id="slot-d">
+          <aside class="col" id="colRight" data-panel="right">
+            <div class="hd" draggable="true" data-drag="right">
+              <span class="grab">⋮⋮</span>
+              <div class="tabs">
+                <button class="tab on" data-tab="pocket" type="button">Bolsillo</button>
+                <button class="tab" data-tab="agents" type="button">Agentes</button>
+              </div>
+              <button class="icon" data-collapse="colRight" type="button">–</button>
+            </div>
+            <div class="scroll pane" id="pane-pocket"></div>
+            <div class="scroll pane" id="pane-agents" hidden></div>
+          </aside>
+        </div>
+      </div>
+      <div class="gutter gutter-v dock-gutter" data-split="dock" title="altura del blotter"></div>
+      <section class="col dock" id="dock">
+        <div class="hd">
+          Paper en curso — fees FOMO + DEX + tax + slip ya descontados
+          <button class="btn tiny" data-view="ops" type="button">abrir blotter</button>
+        </div>
+        <div class="dock-body" id="dockBody"></div>
+      </section>
+    </div>
+
+    <div class="view" id="view-ops">
+      <p class="ops-legend">Cada fill paper cobra lo mismo que FOMO / Jupiter: fee de follow, pool DEX, priority, tax del token y slippage (lag + impacto). Ida y vuelta.</p>
+      <div class="kpis" id="kpis"></div>
+      <div class="ops-stack">
+        <section class="col">
+          <div class="hd">Abiertas</div>
+          <div class="scroll" id="opsOpen"></div>
+        </section>
+        <section class="col">
+          <div class="hd">Cerradas · ticket round-trip</div>
+          <div class="scroll" id="opsHist"></div>
+        </section>
+      </div>
+    </div>
+
+    <div class="view" id="view-cfg">
+      <div class="cfg-head">
+        <div>
+          <h1>Configurá el paper</h1>
+          <p>Números de gente, no de código. Guardar aplica al próximo PAPER BUY.</p>
+        </div>
+        <div class="presets">
+          <button class="btn ghost" type="button" data-preset="safe">conservador</button>
+          <button class="btn ghost" type="button" data-preset="fomo">FOMO default</button>
+          <button class="btn ghost" type="button" data-preset="agg">agresivo</button>
+        </div>
+      </div>
+      <form id="cfgForm">
+        <div class="cfg-grid">
+          <section class="cfg-card">
+            <h3>Tu capital</h3>
+            <label>Bankroll USD<input name="bankroll" type="number" step="50" min="50" /></label>
+            <label>Size por confluencia %<input name="sizePctHuman" type="number" step="0.1" min="0.2" max="20" /></label>
+            <label>Máx. posiciones abiertas<input name="maxOpen" type="number" step="1" min="1" max="20" /></label>
+            <label>Kill diario %<input name="maxDailyLossPct" type="number" step="1" min="1" max="50" /></label>
+          </section>
+          <section class="cfg-card">
+            <h3>Señal</h3>
+            <label>Wallets mínimas (N)<input name="minN" type="number" step="1" min="2" max="8" /></label>
+            <label>Ventana (segundos)<input name="windowSec" type="number" step="10" min="30" max="900" /></label>
+            <p class="cfg-help">Un ape solo no dispara. N=2 en 180s es el default del desk.</p>
+          </section>
+          <section class="cfg-card">
+            <h3>Fees como FOMO</h3>
+            <label>Modo fee FOMO
+              <select name="fomoFeeMode">
+                <option value="flat">flat $1 / trade (app)</option>
+                <option value="pct">% con piso $1</option>
+              </select>
+            </label>
+            <label>FOMO flat USD<input name="fomoFlatUsd" type="number" step="0.1" min="0" max="20" /></label>
+            <label>FOMO % (si modo %)<input name="fomoPctHuman" type="number" step="0.05" min="0" max="5" /></label>
+            <label>DEX / Jupiter (bps)<input name="dexBps" type="number" step="1" min="0" max="300" /></label>
+            <label>Priority / tip USD<input name="priorityFeeUsd" type="number" step="0.01" min="0" max="2" /></label>
+            <label>Slippage piso %<input name="minSlipPct" type="number" step="0.05" min="0" max="5" /></label>
+            <label>Slippage techo %<input name="maxSlippagePct" type="number" step="0.1" min="0.2" max="15" /></label>
+          </section>
+          <section class="cfg-card">
+            <h3>Ticket de ejemplo</h3>
+            <p class="cfg-help">Si hoy comprás el size default, esto te cobra FOMO. Tax del token se suma si el micro lo trae (la mayoría de pump = 0).</p>
+            <div id="cfgTicket"></div>
+            <div class="span2" style="margin-top:18px">
+              <button class="btn" type="submit">guardar config</button>
+            </div>
+          </section>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div class="modal" id="playbookModal">
+    <div class="box">
+      <h2>Playbook</h2>
+      <p id="playbookHint">Checklist. El click sigue siendo tuyo.</p>
+      <ul class="check" id="playbookList"></ul>
+      <div class="follow" style="padding:0;margin-top:16px">
+        <button class="btn" id="playbookGo" type="button">confirmo · paper buy</button>
+        <button class="btn ghost" id="playbookNo" type="button">abortar</button>
+      </div>
+    </div>
+  </div>
+  <div class="toast" id="toast"></div>
+  <script src="engine.js"></script>
+  <script src="desk.js"></script>
+</body>
+</html>

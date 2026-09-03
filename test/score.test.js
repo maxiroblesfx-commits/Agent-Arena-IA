@@ -112,3 +112,12 @@ test("edge y copiabilidad se multiplican, no se suman", () => {
   assert.ok(c.score < 20, "mala copiabilidad");
   assert.ok(Math.round((e.score * c.score) / 100) < 15, "un trader bueno pero incopiable no sirve");
 });
+
+test("distingue una demora que te perjudica de una que te favorece", () => {
+  const base = { medianHoldMs: 4 * 3600000, medianEntryFills: 2 };
+  const contra = sc.copyScore(base, 150);
+  const favor = sc.copyScore(base, -150);
+  assert.ok(contra.reasons.some((x) => /te cuesta/.test(x)), "positivo = en contra");
+  assert.ok(favor.reasons.some((x) => /te favorece/.test(x)), "negativo = a favor");
+  assert.ok(favor.score > contra.score, "una demora favorable no puede penalizar igual");
+});

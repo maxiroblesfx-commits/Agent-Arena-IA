@@ -188,9 +188,13 @@ function copyScore(s, lagBps) {
 
   // Costo medido de llegar tarde, si se calculó.
   if (typeof lagBps === "number" && Number.isFinite(lagBps)) {
+    // Positivo = el precio se movió en contra tuya mientras reaccionabas.
+    // Negativo = se movió a favor: esperar un minuto te salía más barato.
     const penalty = clamp(lagBps / 120, 0, 1) * 45;
     score -= penalty;
-    reasons.push(`llegar 1 min tarde cuesta ${lagBps.toFixed(0)} bps`);
+    reasons.push(lagBps > 0
+      ? `llegar 1 min tarde te cuesta ${lagBps.toFixed(0)} bps`
+      : `esperar 1 min te favorece ${Math.abs(lagBps).toFixed(0)} bps — su entrada no mueve el precio en contra`);
   } else {
     reasons.push("costo de demora sin medir (correr con --lag)");
   }

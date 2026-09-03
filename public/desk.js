@@ -492,4 +492,15 @@ function connect() {
   es.onmessage = (ev) => { try { render(JSON.parse(ev.data)); } catch {} };
   es.onerror = () => { es.close(); setTimeout(connect, 1500); };
 }
-connect();
+(async function boot() {
+  try {
+    const r = await fetch("/api/state", { cache: "no-store" });
+    if (!r.ok) throw new Error("no api");
+    connect();
+  } catch {
+    if (!window.CX) { toast("No hay motor"); return; }
+    window.__cxLocal = true;
+    window.CX.start(render);
+    toast("GitHub Pages: el paper corre en tu navegador.");
+  }
+})();

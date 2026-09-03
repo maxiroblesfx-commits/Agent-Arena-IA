@@ -11,6 +11,8 @@ const PORT = Number(process.env.PORT || 3000);
 const HOST = "0.0.0.0";
 const FOMO_API = "https://api.fomoscope.xyz";
 const FOMOSCAN_API = "https://api.fomoscan.sh";
+// Demo traffic is opt-in. A failed provider must never look like a real trade.
+const DEMO_MODE = process.env.DEMO_MODE === "true";
 const STORE = path.join(__dirname, "data", "store.json");
 const PUBLIC = path.join(__dirname, "docs");
 const JUNK_PNL = 1e12;
@@ -123,7 +125,7 @@ function saveStore() {
 }
 
 const state = {
-  feed: "sim", latencyMs: 180, liveError: null,
+  feed: "offline", latencyMs: 0, liveError: null,
   tape: [], cards: [], agents: [], pocket: [],
   clustersSeen: new Set(), buys: [], sells: [],
   coOccur: new Map(), invalidations: [], marks: {},
@@ -556,7 +558,9 @@ async function tryLive() {
     broadcast();
     return true;
   } catch (e) {
-    state.feed = "sim"; state.liveError = String(e.message || e);
+    state.feed = DEMO_MODE ? "sim" : "offline";
+    state.latencyMs = 0;
+    state.liveError = String(e.message || e);
     return false;
   }
 }
@@ -845,14 +849,20 @@ server.listen(PORT, HOST, async () => {
   logAgent("SCT", "econoar = eric.eth. SOL 7sQJ…FN2H · EVM 0x1605…c91f · Solscan $84.2k · 1.92M $fone. Fomo co-signer activo.", "hot");
   logAgent("FOR", "Privy FOMO ≠ tape wallet en Tasso/nobsicle/Inspector. Scout guarda ambos.", "warn");
   const live = await tryLive();
-  if (!live) {
-    logAgent("SEN", "Stream externo bloqueado. Sim con latencia marcada. Yellowstone queda para host con RPC.", "warn");
+  if (!live && DEMO_MODE) {
+    logAgent("SEN", "DEMO_MODE=true: tráfico sintético, nunca confundir con el tape real.", "warn");
     ingestBuy({ handle: "econoar", ticker: "fone", usd: 8400, side: "buy" });
     simTick();
+  } else if (!live) {
+    logAgent("SEN", "Tape externo no disponible. No se generan movimientos simulados; reintento en 45s.", "warn");
   }
-  pocketPush("sys", "Desk en línea", "econoar resuelto. Bolsillo listo. Telegram si hay TELEGRAM_BOT_TOKEN.");
+  pocketPush("sys", "Desk en línea", live ? "Tape FOMO conectado." : "Tape sin conexión; no se muestran trades inventados.");
   broadcast();
-  setInterval(() => { if (state.feed === "live") tryLive(); else simTick(); broadcast(); }, 7000);
+  setInterval(() => {
+    if (state.feed === "live") tryLive();
+    else if (DEMO_MODE) simTick();
+    broadcast();
+  }, 7000);
   setInterval(() => { tryLive(); }, 45000);
   console.log("CONFLUENCE desk http://" + HOST + ":" + PORT);
 });

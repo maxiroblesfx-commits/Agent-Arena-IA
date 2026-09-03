@@ -237,10 +237,12 @@ function ticketHtml(t, mode) {
 
 function renderDesk(s) {
   const live = s.feed === "live";
+  const demo = s.feed === "sim";
+  const offline = !live && !demo;
   $("feedDot").className = "dot" + (live ? "" : " sim");
-  $("feedChip").textContent = live ? "tape live FOMO" : "snapshot + sim";
+  $("feedChip").textContent = live ? "tape live FOMO" : demo ? "demo · simulado" : "tape sin backend";
   $("feedChip").className = "chip " + (live ? "on" : "warn");
-  $("lagChip").textContent = (s.latencyMs || "—") + " ms";
+  $("lagChip").textContent = live ? (s.latencyMs || "—") + " ms" : "lat —";
   $("watchN").textContent = s.stats.watch;
   $("chSol").classList.toggle("on", s.settings.chain !== "base");
   $("chBase").classList.toggle("on", s.settings.chain === "base");
@@ -310,7 +312,7 @@ function renderDesk(s) {
         <button class="btn ghost" data-skip="${c.id}" ${disabled ? "disabled" : ""}>snooze</button>
       </div>
     </article>`;
-  }).join("") : `<div class="empty">Esperando cluster. Un ape solo no es señal.</div>`;
+  }).join("") : `<div class="empty">${offline ? "Tape detenido: sin backend no se inventan alertas ni operaciones." : "Esperando cluster. Un ape solo no es señal."}</div>`;
 
   const tape = s.tape.slice(0, 36);
   $("tapeN").textContent = String(tape.length);
@@ -325,7 +327,7 @@ function renderDesk(s) {
       <div class="tape-who" title="${who}"><b>${who}</b>${e.thesis ? " · " + e.thesis : ""}</div>
       <div class="amt">${amount}<br>${ago(e.ts)}</div>
     </article>`;
-  }).join("") || `<div class="empty">Esperando tape.</div>`;
+  }).join("") || `<div class="empty">${offline ? "GitHub Pages no ejecuta el backend. Conectalo para mostrar el tape FOMO real." : "Esperando tape."}</div>`;
 
   $("pane-pocket").innerHTML = s.pocket.length ? s.pocket.map((p) => `
     <article class="pk ${p.kind}">
@@ -578,6 +580,6 @@ function connect() {
     if (!window.CX) { toast("No hay motor"); return; }
     window.__cxLocal = true;
     window.CX.start(render);
-    toast("GitHub Pages: el paper corre en tu navegador.");
+    toast("GitHub Pages: paper local · tape sin backend. No se inventan trades.");
   }
 })();

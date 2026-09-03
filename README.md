@@ -33,7 +33,7 @@ Queda en:
 
 **https://maxiroblesfx-commits.github.io/Agent-Arena-IA/**
 
-Ahí el desk corre en el navegador (paper FOMO+DEX+tax+slip, sin Node).
+Ahí el desk corre en el navegador (paper FOMO+DEX+tax+slip, sin Node). GitHub Pages **no simula movimientos**: sin un backend conectado el Tape queda detenido para no hacer pasar datos sintéticos por trades reales.
 
 ## Cómo correr local
 
@@ -46,6 +46,10 @@ Abre `http://localhost:3000` (o `0.0.0.0:3000` en el host).
 Vistas: **Desk** · **Paper** · **Config**.
 
 Si `api.fomoscope.xyz` es alcanzable, el tape es live. Si no, corre snapshot + sim con traders y tokens reales verificados el 2026-09-02. `FOMOSCOPE_API_KEY` es opcional: sin key usa el bucket público; con key tiene una cuota propia. Para resolver cualquier perfil indexado por FomoScan, configurá opcionalmente `FOMOSCAN_API_KEY`; sin ella se usa el board público de FomoScope como fallback.
+
+## Datos reales vs. demo
+
+El tape real se obtiene desde el backend Node (`node server.js`) y su proveedor configurado. GitHub Pages no puede ejecutar ese backend, por eso la versión estática muestra **“tape sin backend”** y no genera operaciones ni alertas ficticias. Para probar el diseño con tráfico sintético, el modo demo es explícito: `DEMO_MODE=true node server.js` en Node o `?demo=1` en la página estática. Nunca se activa para visitantes normales.
 
 ## Handles y wallets
 

@@ -1,6 +1,9 @@
 /* Motor local para GitHub Pages (sin Node). Mismo paper FOMO+DEX+tax+slip. */
 (function (w) {
   const JUNK = 1e12;
+  // GitHub Pages is static. Synthetic tape is available only when a developer
+  // explicitly opens ?demo=1; normal visitors must never see invented trades.
+  const DEMO_MODE = new URLSearchParams(window.location.search).get("demo") === "1";
   const ECONOAR = {
     handle: "econoar", name: "eric.eth", followers: 48000, pnl: 0, kol: true,
     wallet: "7sQJttJLutWjHkxbusTgE4GpSj5z4fegouv2USHDFN2H",
@@ -117,7 +120,7 @@
   } catch {}
   function save() { localStorage.setItem("cx.pages.store", JSON.stringify(store)); }
 
-  const state = { feed: "sim", latencyMs: 180, tape: [], cards: [], agents: [], pocket: [], buys: [], marks: {}, invalidations: [] };
+  const state = { feed: "offline", latencyMs: 0, tape: [], cards: [], agents: [], pocket: [], buys: [], marks: {}, invalidations: [] };
   const subs = [];
   function log(code, msg, level) {
     state.agents.unshift({ t: iso(), code, msg, level: level || "info" });
@@ -161,7 +164,7 @@
     const lagAvg = store.ledger.length ? store.ledger.reduce((s, x) => s + (x.lagMs || 0), 0) / store.ledger.length : 0;
     const csh = cash();
     return {
-      feed: "sim", latencyMs: state.latencyMs, settings: store.settings,
+      feed: state.feed, latencyMs: state.latencyMs, settings: store.settings,
       watchlist: watchTraders(), tape: state.tape.slice(0, 50),
       cards: state.cards.slice(0, 18).map((c) => {
         if (!c.size) return c;
@@ -347,12 +350,19 @@
   w.CX = {
     start(fn) {
       subs.push(fn);
-      log("CEO", "GitHub Pages · paper en el navegador. Auto OFF.", "hot");
-      pocket("sys", "Desk en Pages", "No hay Node. El paper vive en este browser.");
-      ingest("econoar", "fone", 8400, "buy");
-      tick();
+      if (DEMO_MODE) {
+        state.feed = "sim";
+        log("CEO", "DEMO MODE · trades sintéticos, no son movimientos FOMO reales.", "warn");
+        pocket("sys", "Demo activa", "Los movimientos son sintéticos. Quitá ?demo=1 para detenerlos.");
+        ingest("econoar", "fone", 8400, "buy");
+        tick();
+        setInterval(tick, 7000);
+      } else {
+        state.feed = "offline";
+        log("CEO", "GitHub Pages · paper local. Tape detenido: no se inventan trades.", "warn");
+        pocket("sys", "Tape sin backend", "GitHub Pages no ejecuta Node. Conectá el backend para ver el tape real.");
+      }
       emit();
-      setInterval(tick, 7000);
     },
     post,
   };

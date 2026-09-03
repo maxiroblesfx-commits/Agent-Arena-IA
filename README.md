@@ -131,3 +131,25 @@ Dos resultados que conviene tener presentes:
 Los coeficientes de slippage (`impactSlip`) todavía son los heredados y no
 están medidos: sirven para ordenar decisiones, no como precio garantizado.
 Se reemplazan con datos reales cuando el ledger tenga historial.
+
+## Encontrar la wallet de un perfil de FOMO
+
+FOMO no muestra la address en la interfaz, pero la app se la pide a su propio
+backend para armar la página: el dato ya está en tu navegador.
+
+`tools/browser/find-wallet.js` lo busca ahí — en el JSON embebido de la página
+y en las respuestas de la API mientras navegás.
+
+1. Abrí el perfil, por ejemplo `https://fomo.family/profile/econoar`
+2. `F12` → pestaña **Console** (Chrome puede pedirte escribir `allow pasting`)
+3. Pegá todo el archivo y Enter
+4. Recargá con `F5` y esperá a que cargue
+5. Escribí `wallets()` y Enter
+
+Devuelve una tabla ordenada. La página también contiene los *mint* de los
+tokens operados, que **no** son la wallet del trader, así que cada resultado
+muestra bajo qué campo apareció: los que dicen `wallet`, `address`, `owner` o
+`user` van marcados `SÍ ← esta`; los que dicen `mint` o `token` se descartan.
+
+La clasificación compara **palabras**, no substrings — si no, `__NEXT_DATA__`
+contaría como `ata` y descartaría la wallet buena.

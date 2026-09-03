@@ -193,3 +193,51 @@ Dos detalles que los tests fijaron:
   para siempre.
 
 Los swaps token→token se descartan: sin SOL de por medio no hay tamaño medible.
+
+## Estado al 3 sep 2026 — dónde retomar
+
+### El hallazgo que reordena el proyecto
+
+La address que devuelve `userHandle/econoar` (`HZrxCXCms8…`) **no tiene
+actividad on-chain**: Solscan la muestra vacía, y el RPC de Solana también.
+Pero su perfil declara 401 trades y 48 posiciones abiertas.
+
+La explicación es el CSP de la app: FOMO usa **wallets embebidas de Privy** y
+ejecuta en Solana **vía Jito**. La address del perfil es de identidad; los
+swaps se firman desde el router de FOMO.
+
+**Consecuencia:** seguir a estos traders mirando la cadena no funciona. Su
+actividad no es individualmente atribuible on-chain. La única fuente que los
+separa uno por uno es la propia API de FOMO.
+
+### La API real (observada, no supuesta)
+
+Host `prod-api.fomo.family`:
+
+| Endpoint | Devuelve |
+|---|---|
+| `userHandle/<handle>` | `responseObject.address`, `.evmAddress`, `.friendsFollowing[]` |
+| `<userId>/swaps` | `responseObject.swaps[]` — el historial que necesitamos |
+| `<userId>/balances` | posiciones abiertas |
+| `feed/tradingActivity` | el tape en vivo |
+| `trades/<id>` | `responseObject.transfers[]` |
+| `v2/users`, `tokenAllowList/detailed`, `proxy/verifiedTokens` | catálogos |
+
+### Próximo paso concreto
+
+`tools/browser/export-swaps.js` en la consola del perfil de FOMO:
+
+1. `muestra()` — imprime un swap crudo para conocer **la forma real** de los
+   campos. No hay que adivinarlos: ese fue el error que produjo todo el
+   catálogo falso que ya purgamos.
+2. `exportar()` — descarga `swaps.json` con todo lo capturado.
+
+Con esa forma a la vista se escribe el normalizador y `scout.js` puede puntuar
+a econoar con su historial verdadero.
+
+### Lo que quedó cerrado
+
+- econoar **no** opera perpetuos en Hyperliquid (verificado, 180 días sin fills).
+- Las addresses del catálogo viejo eran **falsas** (purgado).
+- `api.fomoscope.xyz` y `api.fomoscan.sh` **no existen** en el CSP de la app.
+- Con bankroll bajo y fee flat de $1, el break-even al 5% del capital es ~11,6%.

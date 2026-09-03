@@ -109,3 +109,25 @@ niega a puntuar** en vez de inventar una nota.
 **Acepta addresses, no handles.** FOMO no publica un resolver de handles: abrí
 el perfil, copiá la address pública y pegala. Una address de Solana se reporta
 como fuera de alcance — esa pata necesita un indexador con key, no Hyperliquid.
+
+## Break-even — cuánto tenés que hacer para no perder
+
+`tools/breakeven.js` usa el mismo motor de fees que el paper trading, así que
+el número y el blotter nunca se contradicen.
+
+```bash
+node tools/breakeven.js --bankroll 500 --mcap 1600000 --lag 800
+node tools/breakeven.js --bankroll 500 --target 5    # ¿qué tamaño necesito?
+```
+
+Dos resultados que conviene tener presentes:
+
+- **El fee flat es toda la causa del castigo a las posiciones chicas.** Con
+  fee de $1, una posición de $10 necesita subir ~25%; sin fee flat, ~2%.
+- **La curva es en U.** El fee fijo empuja a agrandar la posición y el impacto
+  de mercado empuja a achicarla, así que existe un tamaño óptimo — y no es ni
+  el más chico ni el más grande.
+
+Los coeficientes de slippage (`impactSlip`) todavía son los heredados y no
+están medidos: sirven para ordenar decisiones, no como precio garantizado.
+Se reemplazan con datos reales cuando el ledger tenga historial.

@@ -135,21 +135,40 @@ Se reemplazan con datos reales cuando el ledger tenga historial.
 ## Encontrar la wallet de un perfil de FOMO
 
 FOMO no muestra la address en la interfaz, pero la app se la pide a su propio
-backend para armar la página: el dato ya está en tu navegador.
+backend para armar la página: el dato ya está en el navegador.
 
 `tools/browser/find-wallet.js` lo busca ahí — en el JSON embebido de la página
-y en las respuestas de la API mientras navegás.
+y en las respuestas de la API mientras se navega.
 
-1. Abrí el perfil, por ejemplo `https://fomo.family/profile/econoar`
-2. `F12` → pestaña **Console** (Chrome puede pedirte escribir `allow pasting`)
-3. Pegá todo el archivo y Enter
-4. Recargá con `F5` y esperá a que cargue
-5. Escribí `wallets()` y Enter
+1. Abrí el perfil y **esperá a que cargue** — por ejemplo `fomo.family/profile/econoar`
+2. Recién ahí `F12` → **Console** (si Chrome bloquea, escribí `allow pasting`)
+3. Pegá el archivo y Enter. Escanea solo.
 
-Devuelve una tabla ordenada. La página también contiene los *mint* de los
-tokens operados, que **no** son la wallet del trader, así que cada resultado
-muestra bajo qué campo apareció: los que dicen `wallet`, `address`, `owner` o
-`user` van marcados `SÍ ← esta`; los que dicen `mint` o `token` se descartan.
+**No recargues la página**: una recarga borra el script. Para juntar más datos,
+navegá *dentro* de la app (swaps, posiciones, un token) y repetí `wallets()`.
 
-La clasificación compara **palabras**, no substrings — si no, `__NEXT_DATA__`
+Comandos: `wallets()` · `endpoints()` · `dump()`
+
+La página también trae los *mint* de los tokens operados, que **no** son la
+wallet del trader, así que cada resultado muestra bajo qué campo apareció. La
+clasificación compara **palabras**, no substrings — si no, `__NEXT_DATA__`
 contaría como `ata` y descartaría la wallet buena.
+
+### Lo que el CSP de FOMO reveló
+
+El `Content-Security-Policy` de la app lista todos los dominios con los que
+puede hablar. Es su arquitectura, publicada sin querer:
+
+| Dominio | Qué es |
+|---|---|
+| `api.hyperliquid.xyz` + `wss://` | Perpetuos. Confirmado. |
+| `mainnet.block-engine.jito.wtf` | Jito — ejecución de bundles en Solana |
+| `fomo-api.mobula.io` + `wss://` | Mobula, su proveedor de datos de mercado |
+| `auth.privy.io`, `*.rpc.privy.systems` | Privy — las wallets embebidas |
+| `ws.relay.link` | Puentes entre cadenas |
+| `token-media.defined.fi` | Metadata de tokens |
+
+**`api.fomoscope.xyz` y `api.fomoscan.sh` no aparecen.** El CSP es la lista
+cerrada de lo que la app puede llamar: si no están ahí, la app nunca los usó.
+Es la evidencia más fuerte hasta ahora de que esos dos endpoints —de los que
+depende todo `server.js`— fueron inventados.

@@ -172,3 +172,24 @@ puede hablar. Es su arquitectura, publicada sin querer:
 cerrada de lo que la app puede llamar: si no están ahí, la app nunca los usó.
 Es la evidencia más fuerte hasta ahora de que esos dos endpoints —de los que
 depende todo `server.js`— fueron inventados.
+
+### Solana
+
+`node tools/scout.js <address-de-solana>` lee los swaps desde un RPC público
+(sin API key) y aplica el mismo puntaje, con el resultado medido en SOL.
+
+No intenta entender cada DEX. Lee lo único que no depende del programa usado:
+cómo cambiaron los saldos del dueño en la transacción. Si un token subió y el
+SOL bajó, fue compra. Funciona igual con Jupiter, Raydium, pump.fun o el que
+venga después.
+
+Dos detalles que los tests fijaron:
+
+- **El polvo de la comisión no es plata cobrada.** Devolver el fee deja unos
+  5000 lamports de residuo; sin un piso, una transferencia de tokens se leía
+  como una venta.
+- **Se cierra la posición con menos del 1% restante.** En Solana casi siempre
+  queda polvo sin vender, y esperar el cero exacto dejaba operaciones abiertas
+  para siempre.
+
+Los swaps token→token se descartan: sin SOL de por medio no hay tamaño medible.

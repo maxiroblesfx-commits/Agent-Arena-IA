@@ -16,6 +16,7 @@
 const fs = require("fs");
 const hl = require("./hl");
 const sc = require("./score");
+const sol = require("./sol");
 
 const EVM = /^0x[a-fA-F0-9]{40}$/;
 const SOLANA = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
@@ -27,6 +28,7 @@ function parseArgs(argv) {
     if (a === "--days") o.days = Number(argv[++i]) || 90;
     else if (a === "--lag") o.lag = true;
     else if (a === "--json") o.json = argv[++i];
+    else if (a === "--max") o.max = Number(argv[++i]) || 400;
     else if (a === "--help" || a === "-h") o.help = true;
     else o.targets.push(a);
   }
@@ -88,11 +90,7 @@ async function scoutOne(target, opts) {
       "es un handle, no una address. FOMO no publica un resolver y este entorno no lo alcanza. " +
       "Abrí su perfil, copiá la address pública y volvé a correr con eso." };
   }
-  if (c.kind === "solana") {
-    return { target, status: "fuera-de-alcance", address: c.address, note:
-      "address de Solana. El historial de swaps necesita un indexador con key (Helius o similar), " +
-      "no la API pública de Hyperliquid. Queda para la pata Solana del adaptador." };
-  }
+  if (c.kind === "solana") return scoutSolana(c.address, target, opts);
 
   const since = Date.now() - opts.days * 86400000;
   let fills;
@@ -115,22 +113,63 @@ async function scoutOne(target, opts) {
   return { target, status: res.ok ? "ok" : "muestra-corta", address: c.address, fills: fills.length, lag, ...res };
 }
 
+/** Solana: lee los swaps desde un RPC público y puntúa igual que Hyperliquid,
+ *  pero con el resultado medido en SOL. */
+async function scoutSolana(address, target, opts) {
+  const desde = Date.now() - opts.days * 86400000;
+  let firmas;
+  try {
+    firmas = await sol.signatures(address, opts.max || 400);
+  } catch (e) {
+    return { target, status: "error", address, note: "RPC de Solana: " + e.message };
+  }
+  const enVentana = firmas.filter((f) => (f.blockTime || 0) * 1000 >= desde);
+  if (!enVentana.length) {
+    return { target, status: "sin-actividad", address,
+      note: `sin transacciones en los últimos ${opts.days} días.` };
+  }
+
+  process.stdout.write(`  leyendo ${enVentana.length} transacciones de Solana`);
+  const swaps = [];
+  let leidas = 0;
+  for (const f of enVentana) {
+    try {
+      const tx = await sol.transaction(f.signature);
+      const sw = tx && sol.parseSwap(tx, address);
+      if (sw) swaps.push(sw);
+    } catch { /* una transacción ilegible no invalida el resto */ }
+    if (++leidas % 25 === 0) process.stdout.write(".");
+    await new Promise((r) => setTimeout(r, 90));   // el RPC público es compartido
+  }
+  process.stdout.write("\n");
+
+  if (!swaps.length) {
+    return { target, status: "sin-swaps", address, txs: enVentana.length,
+      note: "hubo actividad pero ningún swap contra SOL legible. Puede operar par token→token." };
+  }
+  const res = sc.rateSwaps(swaps);
+  return { target, status: res.ok ? "ok" : "muestra-corta", address,
+    fills: swaps.length, txs: enVentana.length, chain: "solana", ...res };
+}
+
 function report(r) {
   const head = `\n${"─".repeat(72)}\n${r.target}${r.address && r.address !== r.target ? "  " + r.address : ""}`;
   if (r.status !== "ok" && r.status !== "muestra-corta") {
     return head + `\n  ${r.status.toUpperCase()} — ${r.note}`;
   }
   const s = r.stats;
+  const sol = r.unidad === "SOL";
+  const m = (n) => (sol ? (n >= 0 ? "" : "-") + Math.abs(n).toFixed(3) + " SOL" : fmtUsd(n));
   const L = [head];
-  L.push(`  ${r.fills} fills · ${s.n} operaciones cerradas · ventana desde ${new Date(s.firstTrade).toISOString().slice(0, 10)}`);
+  L.push(`  ${r.fills} ${sol ? "swaps" : "fills"} · ${s.n} operaciones cerradas · desde ${new Date(s.firstTrade).toISOString().slice(0, 10)}`);
   L.push("");
-  L.push(`  Resultado neto        ${fmtUsd(s.totalNet)}   (fees pagados ${fmtUsd(s.totalFees)})`);
-  L.push(`  Expectativa/op        ${fmtUsd(s.expectancy)}`);
+  L.push(`  Resultado neto        ${m(s.totalNet)}${sol ? "   (fees ya dentro del precio)" : "   (fees pagados " + fmtUsd(s.totalFees) + ")"}`);
+  L.push(`  Expectativa/op        ${m(s.expectancy)}`);
   L.push(`  Aciertos              ${(s.winRate * 100).toFixed(0)}%`);
   L.push(`  Top-3 del PnL         ${(s.top3Share * 100).toFixed(0)}%${s.top3Share > 0.6 ? "   ← concentrado, ojo" : ""}`);
-  L.push(`  Drawdown máx.         ${fmtUsd(s.maxDrawdown)}  (${(s.maxDDvsGain * 100).toFixed(0)}% de lo ganado)`);
+  L.push(`  Drawdown máx.         ${m(s.maxDrawdown)}  (${(s.maxDDvsGain * 100).toFixed(0)}% de lo ganado)`);
   L.push(`  Tenencia mediana      ${fmtDur(s.medianHoldMs)}`);
-  L.push(`  Fills por entrada     ${s.medianEntryFills.toFixed(1)}`);
+  L.push(`  Compras por entrada   ${s.medianEntryFills.toFixed(1)}`);
   L.push(`  Liquidaciones         ${s.liquidations}`);
   if (r.lag) L.push(`  Costo de 1 min tarde  ${r.lag.medianBps.toFixed(0)} bps  (${r.lag.samples} muestras)`);
 
@@ -157,7 +196,11 @@ async function main() {
     process.exit(opts.help ? 0 : 1);
   }
 
-  console.log(`Scout · ${hl.ENDPOINT} · ventana ${opts.days} días${opts.lag ? " · midiendo demora" : ""}`);
+  const clases = opts.targets.map(classify);
+  const fuentes = [];
+  if (clases.some((c) => c.kind === "evm")) fuentes.push(hl.ENDPOINT);
+  if (clases.some((c) => c.kind === "solana")) fuentes.push(sol.RPC);
+  console.log(`Scout · ${fuentes.join(" + ") || "sin fuente"} · ventana ${opts.days} días${opts.lag ? " · midiendo demora" : ""}`);
 
   const results = [];
   for (const t of opts.targets) {

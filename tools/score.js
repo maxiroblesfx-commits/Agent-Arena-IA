@@ -95,6 +95,53 @@ function finish(ep) {
   return ep;
 }
 
+/** Lo mismo que episodes(), pero desde swaps de Solana.
+ *  Acá no hay closedPnl: el resultado es lo que entró en SOL menos lo que
+ *  salió. Una posición se considera cerrada cuando queda menos del 1% del
+ *  máximo que llegó a tener — en Solana casi siempre queda polvo sin vender. */
+function episodesFromSwaps(swaps) {
+  const porMint = new Map();
+  for (const s of swaps) {
+    if (!porMint.has(s.mint)) porMint.set(s.mint, []);
+    porMint.get(s.mint).push(s);
+  }
+
+  const out = [];
+  for (const [mint, lista] of porMint) {
+    lista.sort((a, b) => a.ts - b.ts);
+    let ep = null, pos = 0, maxPos = 0;
+
+    for (const s of lista) {
+      const delta = s.side === "buy" ? s.tokenAmount : -s.tokenAmount;
+      if (!ep && delta > 0) {
+        ep = { coin: mint, openTime: s.ts, closeTime: s.ts, gastado: 0, cobrado: 0,
+               fills: 0, entryFills: 0, liquidated: false };
+        pos = 0; maxPos = 0;
+      }
+      if (!ep) continue;                       // vender algo que no vimos comprar
+
+      pos += delta;
+      if (pos > maxPos) maxPos = pos;
+      ep.fills++;
+      ep.closeTime = s.ts;
+      if (s.side === "buy") { ep.entryFills++; ep.gastado += s.sol; }
+      else ep.cobrado += s.sol;
+
+      if (maxPos > 0 && pos <= maxPos * 0.01) {
+        ep.net = ep.cobrado - ep.gastado;      // resultado en SOL
+        ep.notional = ep.gastado;
+        ep.pnl = ep.net; ep.fees = 0;          // las fees ya están dentro del precio
+        ep.holdMs = Math.max(0, ep.closeTime - ep.openTime);
+        out.push(ep);
+        ep = null; pos = 0; maxPos = 0;
+      }
+    }
+    // Una posición todavía abierta no se cuenta: no tiene resultado.
+  }
+  out.sort((a, b) => a.openTime - b.openTime);
+  return out;
+}
+
 /** Estadística cruda. Sin juicio todavía. */
 function stats(eps) {
   const nets = eps.map((e) => e.net);
@@ -202,6 +249,20 @@ function copyScore(s, lagBps) {
   return { score: Math.round(clamp(score, 0, 100)), reasons };
 }
 
+function evaluar(eps, lagBps) {
+  const s = stats(eps);
+  if (s.n < MIN_TRADES) {
+    return { ok: false, reason: `muestra insuficiente: ${s.n} operaciones cerradas, mínimo ${MIN_TRADES}`, stats: s, episodes: eps };
+  }
+  const edge = edgeScore(s), copy = copyScore(s, lagBps);
+  return { ok: true, stats: s, episodes: eps, edge, copy, final: Math.round((edge.score * copy.score) / 100) };
+}
+
+/** Puntúa desde swaps de Solana (resultado en SOL, no en dólares). */
+function rateSwaps(swaps, lagBps) {
+  return { ...evaluar(episodesFromSwaps(swaps), lagBps), unidad: "SOL" };
+}
+
 function rate(fills, lagBps) {
   const eps = episodes(fills);
   const s = stats(eps);
@@ -225,4 +286,4 @@ function rate(fills, lagBps) {
   };
 }
 
-module.exports = { episodes, stats, edgeScore, copyScore, rate, median, MIN_TRADES };
+module.exports = { episodes, episodesFromSwaps, stats, edgeScore, copyScore, rate, rateSwaps, median, MIN_TRADES };

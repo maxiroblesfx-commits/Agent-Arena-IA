@@ -1,20 +1,16 @@
 #!/usr/bin/env node
 "use strict";
-/* Scout — puntúa traders con su historial público de Hyperliquid.
+/* Scout — puntúa traders con su historial público, en Hyperliquid y en Solana.
  * Archivo único: no hay que instalar ni clonar nada. Node 18 o superior.
- *
- *   node scout.js 0xTuAddress
- *   node scout.js --days 180 --lag 0xTuAddress
- *
- * Generado desde tools/hl.js + tools/score.js + tools/scout.js
  */
 const fs = require("fs");
 const AYUDA = [
-  "Scout — puntúa traders con su historial público de Hyperliquid.",
+  "Scout — puntúa traders con su historial público.",
   "",
-  "  node scout.js 0xTuAddress",
-  "  node scout.js --days 180 --lag 0xTuAddress     más historial + medir demora",
-  "  node scout.js --json salida.json 0xA 0xB       vuelca todo a un archivo",
+  "  node scout.js 0xAddressEVM        perpetuos en Hyperliquid",
+  "  node scout.js AddressDeSolana     swaps en Solana",
+  "  node scout.js --days 180 --lag 0xA --json out.json",
+  "  node scout.js --max 600 AddressDeSolana    (cuántas transacciones leer)",
   "",
   "Acepta addresses, no handles.",
 ].join("\n");
@@ -107,6 +103,135 @@ async function state(user) {
 async function candles(coin, startTime, endTime, interval = "1m") {
   const res = await info({ type: "candleSnapshot", req: { coin, interval, startTime, endTime } });
   return Array.isArray(res) ? res : [];
+}
+
+/** Lector de swaps en Solana desde un RPC público. Sin API key.
+ *
+ *  No intenta entender cada DEX (Jupiter, Raydium, pump.fun, Meteora...).
+ *  Lee lo único que no depende del programa usado: cómo cambiaron los saldos
+ *  del dueño en la transacción. Si un token subió y el SOL bajó, fue compra.
+ *  Eso funciona igual con cualquier DEX, presente o futuro.
+ */
+
+const RPC = process.env.SOLANA_RPC || "https://api.mainnet-beta.solana.com";
+const WSOL = "So11111111111111111111111111111111111111112";
+const LAMPORTS = 1e9;
+
+/* Piso de polvo. Sumar de vuelta la comisión deja un saldo de SOL diminuto
+ * (unos 5000 lamports) que NO es plata cobrada: sin este piso, una simple
+ * transferencia de tokens se leía como una venta. 0.001 SOL está muy por
+ * encima del ruido de comisiones y muy por debajo de cualquier operación real. */
+const MIN_SOL = 0.001;
+
+const STABLES = {
+  EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v: "USDC",
+  Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB: "USDT",
+};
+
+function sleep(ms) { return new Promise((r) => setTimeout(r, ms)); }
+
+async function rpc(method, params, { retries = 4, timeoutMs = 20000 } = {}) {
+  let last;
+  for (let i = 0; i <= retries; i++) {
+    if (i) await sleep(500 * 2 ** (i - 1));
+    const ac = new AbortController();
+    const t = setTimeout(() => ac.abort(), timeoutMs);
+    try {
+      const r = await fetch(RPC, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
+        signal: ac.signal,
+      });
+      if (r.status === 429) { last = new Error("rate limit del RPC público"); continue; }
+      if (!r.ok) throw new Error("http " + r.status);
+      const j = await r.json();
+      if (j.error) throw new Error(j.error.message || JSON.stringify(j.error));
+      return j.result;
+    } catch (e) {
+      last = e;
+    } finally { clearTimeout(t); }
+  }
+  throw new Error(method + ": " + (last && last.message));
+}
+
+/** Firmas más recientes primero. Pagina hasta `max`. */
+async function signatures(address, max = 300) {
+  const out = [];
+  let before;
+  while (out.length < max) {
+    const lote = await rpc("getSignaturesForAddress",
+      [address, { limit: Math.min(1000, max - out.length), ...(before ? { before } : {}) }]);
+    if (!Array.isArray(lote) || !lote.length) break;
+    out.push(...lote);
+    before = lote[lote.length - 1].signature;
+    if (lote.length < 2) break;
+    await sleep(120);
+  }
+  return out.filter((s) => !s.err);      // las fallidas no son operaciones
+}
+
+function transaction(sig) {
+  return rpc("getTransaction", [sig, { maxSupportedTransactionVersion: 0, encoding: "jsonParsed" }]);
+}
+
+/** Deltas de saldo del dueño. Pura: se puede testear sin red. */
+function deltas(tx, owner) {
+  const m = tx && tx.meta;
+  if (!m) return null;
+  const porMint = new Map();
+
+  const sumar = (lista, signo) => {
+    for (const b of lista || []) {
+      if (b.owner !== owner) continue;
+      const v = Number((b.uiTokenAmount && b.uiTokenAmount.uiAmount) || 0);
+      porMint.set(b.mint, (porMint.get(b.mint) || 0) + signo * v);
+    }
+  };
+  sumar(m.preTokenBalances, -1);
+  sumar(m.postTokenBalances, +1);
+
+  // SOL nativo del dueño, descontando la comisión si él la pagó.
+  const claves = ((tx.transaction || {}).message || {}).accountKeys || [];
+  const i = claves.findIndex((k) => (typeof k === "string" ? k : k.pubkey) === owner);
+  let sol = 0;
+  if (i >= 0 && m.preBalances && m.postBalances) {
+    sol = (m.postBalances[i] - m.preBalances[i]) / LAMPORTS;
+    if (i === 0) sol += (m.fee || 0) / LAMPORTS;     // el fee no es parte del swap
+  }
+  // WSOL se comporta como SOL.
+  if (porMint.has(WSOL)) { sol += porMint.get(WSOL); porMint.delete(WSOL); }
+
+  return { sol, tokens: porMint };
+}
+
+/** Convierte una transacción en un swap normalizado, o null si no lo es. */
+function parseSwap(tx, owner) {
+  const d = deltas(tx, owner);
+  if (!d) return null;
+
+  const movidos = [...d.tokens.entries()].filter(([, v]) => Math.abs(v) > 1e-9);
+  if (movidos.length !== 1) return null;          // ni swap simple, ni transferencia
+
+  const [mint, delta] = movidos[0];
+  const pagoStable = STABLES[mint] ? true : false;
+  if (pagoStable) return null;                     // moverse entre stables no es una operación
+
+  // Lo que se pagó o cobró en SOL debe ir en sentido contrario al token.
+  if (Math.abs(d.sol) < MIN_SOL) return null;
+  if (Math.sign(delta) === Math.sign(d.sol)) return null;
+
+  const ts = (tx.blockTime || 0) * 1000;
+  return {
+    ts,
+    at: ts ? new Date(ts).toISOString() : null,
+    mint,
+    side: delta > 0 ? "buy" : "sell",
+    tokenAmount: Math.abs(delta),
+    sol: Math.abs(d.sol),
+    sig: (tx.transaction && tx.transaction.signatures && tx.transaction.signatures[0]) || null,
+    slot: tx.slot || null,
+  };
 }
 
 /** El puntaje que reemplaza a forensic().
@@ -202,6 +327,53 @@ function finish(ep) {
   ep.net = ep.pnl - ep.fees;
   ep.holdMs = Math.max(0, ep.closeTime - ep.openTime);
   return ep;
+}
+
+/** Lo mismo que episodes(), pero desde swaps de Solana.
+ *  Acá no hay closedPnl: el resultado es lo que entró en SOL menos lo que
+ *  salió. Una posición se considera cerrada cuando queda menos del 1% del
+ *  máximo que llegó a tener — en Solana casi siempre queda polvo sin vender. */
+function episodesFromSwaps(swaps) {
+  const porMint = new Map();
+  for (const s of swaps) {
+    if (!porMint.has(s.mint)) porMint.set(s.mint, []);
+    porMint.get(s.mint).push(s);
+  }
+
+  const out = [];
+  for (const [mint, lista] of porMint) {
+    lista.sort((a, b) => a.ts - b.ts);
+    let ep = null, pos = 0, maxPos = 0;
+
+    for (const s of lista) {
+      const delta = s.side === "buy" ? s.tokenAmount : -s.tokenAmount;
+      if (!ep && delta > 0) {
+        ep = { coin: mint, openTime: s.ts, closeTime: s.ts, gastado: 0, cobrado: 0,
+               fills: 0, entryFills: 0, liquidated: false };
+        pos = 0; maxPos = 0;
+      }
+      if (!ep) continue;                       // vender algo que no vimos comprar
+
+      pos += delta;
+      if (pos > maxPos) maxPos = pos;
+      ep.fills++;
+      ep.closeTime = s.ts;
+      if (s.side === "buy") { ep.entryFills++; ep.gastado += s.sol; }
+      else ep.cobrado += s.sol;
+
+      if (maxPos > 0 && pos <= maxPos * 0.01) {
+        ep.net = ep.cobrado - ep.gastado;      // resultado en SOL
+        ep.notional = ep.gastado;
+        ep.pnl = ep.net; ep.fees = 0;          // las fees ya están dentro del precio
+        ep.holdMs = Math.max(0, ep.closeTime - ep.openTime);
+        out.push(ep);
+        ep = null; pos = 0; maxPos = 0;
+      }
+    }
+    // Una posición todavía abierta no se cuenta: no tiene resultado.
+  }
+  out.sort((a, b) => a.openTime - b.openTime);
+  return out;
 }
 
 /** Estadística cruda. Sin juicio todavía. */
@@ -311,6 +483,20 @@ function copyScore(s, lagBps) {
   return { score: Math.round(clamp(score, 0, 100)), reasons };
 }
 
+function evaluar(eps, lagBps) {
+  const s = stats(eps);
+  if (s.n < MIN_TRADES) {
+    return { ok: false, reason: `muestra insuficiente: ${s.n} operaciones cerradas, mínimo ${MIN_TRADES}`, stats: s, episodes: eps };
+  }
+  const edge = edgeScore(s), copy = copyScore(s, lagBps);
+  return { ok: true, stats: s, episodes: eps, edge, copy, final: Math.round((edge.score * copy.score) / 100) };
+}
+
+/** Puntúa desde swaps de Solana (resultado en SOL, no en dólares). */
+function rateSwaps(swaps, lagBps) {
+  return { ...evaluar(episodesFromSwaps(swaps), lagBps), unidad: "SOL" };
+}
+
 function rate(fills, lagBps) {
   const eps = episodes(fills);
   const s = stats(eps);
@@ -349,6 +535,7 @@ function rate(fills, lagBps) {
 
 
 
+
 const EVM = /^0x[a-fA-F0-9]{40}$/;
 const SOLANA = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
 
@@ -359,6 +546,7 @@ function parseArgs(argv) {
     if (a === "--days") o.days = Number(argv[++i]) || 90;
     else if (a === "--lag") o.lag = true;
     else if (a === "--json") o.json = argv[++i];
+    else if (a === "--max") o.max = Number(argv[++i]) || 400;
     else if (a === "--help" || a === "-h") o.help = true;
     else o.targets.push(a);
   }
@@ -420,11 +608,7 @@ async function scoutOne(target, opts) {
       "es un handle, no una address. FOMO no publica un resolver y este entorno no lo alcanza. " +
       "Abrí su perfil, copiá la address pública y volvé a correr con eso." };
   }
-  if (c.kind === "solana") {
-    return { target, status: "fuera-de-alcance", address: c.address, note:
-      "address de Solana. El historial de swaps necesita un indexador con key (Helius o similar), " +
-      "no la API pública de Hyperliquid. Queda para la pata Solana del adaptador." };
-  }
+  if (c.kind === "solana") return scoutSolana(c.address, target, opts);
 
   const since = Date.now() - opts.days * 86400000;
   let fills;
@@ -447,22 +631,63 @@ async function scoutOne(target, opts) {
   return { target, status: res.ok ? "ok" : "muestra-corta", address: c.address, fills: fills.length, lag, ...res };
 }
 
+/** Solana: lee los swaps desde un RPC público y puntúa igual que Hyperliquid,
+ *  pero con el resultado medido en SOL. */
+async function scoutSolana(address, target, opts) {
+  const desde = Date.now() - opts.days * 86400000;
+  let firmas;
+  try {
+    firmas = await signatures(address, opts.max || 400);
+  } catch (e) {
+    return { target, status: "error", address, note: "RPC de Solana: " + e.message };
+  }
+  const enVentana = firmas.filter((f) => (f.blockTime || 0) * 1000 >= desde);
+  if (!enVentana.length) {
+    return { target, status: "sin-actividad", address,
+      note: `sin transacciones en los últimos ${opts.days} días.` };
+  }
+
+  process.stdout.write(`  leyendo ${enVentana.length} transacciones de Solana`);
+  const swaps = [];
+  let leidas = 0;
+  for (const f of enVentana) {
+    try {
+      const tx = await transaction(f.signature);
+      const sw = tx && parseSwap(tx, address);
+      if (sw) swaps.push(sw);
+    } catch { /* una transacción ilegible no invalida el resto */ }
+    if (++leidas % 25 === 0) process.stdout.write(".");
+    await new Promise((r) => setTimeout(r, 90));   // el RPC público es compartido
+  }
+  process.stdout.write("\n");
+
+  if (!swaps.length) {
+    return { target, status: "sin-swaps", address, txs: enVentana.length,
+      note: "hubo actividad pero ningún swap contra SOL legible. Puede operar par token→token." };
+  }
+  const res = rateSwaps(swaps);
+  return { target, status: res.ok ? "ok" : "muestra-corta", address,
+    fills: swaps.length, txs: enVentana.length, chain: "solana", ...res };
+}
+
 function report(r) {
   const head = `\n${"─".repeat(72)}\n${r.target}${r.address && r.address !== r.target ? "  " + r.address : ""}`;
   if (r.status !== "ok" && r.status !== "muestra-corta") {
     return head + `\n  ${r.status.toUpperCase()} — ${r.note}`;
   }
   const s = r.stats;
+  const sol = r.unidad === "SOL";
+  const m = (n) => (sol ? (n >= 0 ? "" : "-") + Math.abs(n).toFixed(3) + " SOL" : fmtUsd(n));
   const L = [head];
-  L.push(`  ${r.fills} fills · ${s.n} operaciones cerradas · ventana desde ${new Date(s.firstTrade).toISOString().slice(0, 10)}`);
+  L.push(`  ${r.fills} ${sol ? "swaps" : "fills"} · ${s.n} operaciones cerradas · desde ${new Date(s.firstTrade).toISOString().slice(0, 10)}`);
   L.push("");
-  L.push(`  Resultado neto        ${fmtUsd(s.totalNet)}   (fees pagados ${fmtUsd(s.totalFees)})`);
-  L.push(`  Expectativa/op        ${fmtUsd(s.expectancy)}`);
+  L.push(`  Resultado neto        ${m(s.totalNet)}${sol ? "   (fees ya dentro del precio)" : "   (fees pagados " + fmtUsd(s.totalFees) + ")"}`);
+  L.push(`  Expectativa/op        ${m(s.expectancy)}`);
   L.push(`  Aciertos              ${(s.winRate * 100).toFixed(0)}%`);
   L.push(`  Top-3 del PnL         ${(s.top3Share * 100).toFixed(0)}%${s.top3Share > 0.6 ? "   ← concentrado, ojo" : ""}`);
-  L.push(`  Drawdown máx.         ${fmtUsd(s.maxDrawdown)}  (${(s.maxDDvsGain * 100).toFixed(0)}% de lo ganado)`);
+  L.push(`  Drawdown máx.         ${m(s.maxDrawdown)}  (${(s.maxDDvsGain * 100).toFixed(0)}% de lo ganado)`);
   L.push(`  Tenencia mediana      ${fmtDur(s.medianHoldMs)}`);
-  L.push(`  Fills por entrada     ${s.medianEntryFills.toFixed(1)}`);
+  L.push(`  Compras por entrada   ${s.medianEntryFills.toFixed(1)}`);
   L.push(`  Liquidaciones         ${s.liquidations}`);
   if (r.lag) L.push(`  Costo de 1 min tarde  ${r.lag.medianBps.toFixed(0)} bps  (${r.lag.samples} muestras)`);
 
@@ -489,7 +714,11 @@ async function main() {
     process.exit(opts.help ? 0 : 1);
   }
 
-  console.log(`Scout · ${ENDPOINT} · ventana ${opts.days} días${opts.lag ? " · midiendo demora" : ""}`);
+  const clases = opts.targets.map(classify);
+  const fuentes = [];
+  if (clases.some((c) => c.kind === "evm")) fuentes.push(ENDPOINT);
+  if (clases.some((c) => c.kind === "solana")) fuentes.push(RPC);
+  console.log(`Scout · ${fuentes.join(" + ") || "sin fuente"} · ventana ${opts.days} días${opts.lag ? " · midiendo demora" : ""}`);
 
   const results = [];
   for (const t of opts.targets) {

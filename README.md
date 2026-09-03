@@ -194,6 +194,49 @@ Dos detalles que los tests fijaron:
 
 Los swaps token→token se descartan: sin SOL de por medio no hay tamaño medible.
 
+## La API de FOMO — mapa observado
+
+Ninguna de estas rutas está adivinada: salieron de mirar qué llama la propia
+app (`tools/browser/find-wallet.js` → `endpoints()`). Host `prod-api.fomo.family`.
+
+| Ruta | Llamadas vistas | Devuelve |
+|---|---:|---|
+| `/v2/users/userHandle/<handle>` | 106 | `address`, `evmAddress`, `friendsFollowing[]` |
+| `/v2/users/<userId>/swaps` | 474 | `swaps[]` — el historial de operaciones |
+| `/v2/users/<userId>/balances` | 146 | posiciones abiertas |
+| `/v2/users/<userId>/spotlight` | 8 | `bestTrades[].trade.userAddress` |
+| `/v2/transfers/with/<userId>` | 16 | transferencias |
+| `/trades/<tradeId>` | 285 | `transfers[]`, `swaps[]` |
+| `/feed/tradingActivity` | 16 | el tape en vivo |
+| `/proxy/filterTokens` | 1016 | metadata de tokens |
+| `/tokenAllowList/detailed`, `/proxy/verifiedTokens` | 68 | catálogos |
+| `/watchlist`, `/config`, `/v2/users` | — | varios |
+
+Y fuera de ese host:
+
+| | |
+|---|---|
+| `fomo-api.mobula.io/api/2/token/ohlcv-history` | **Historial de precios.** Es lo que permite medir el costo de llegar tarde con datos reales en vez de coeficientes inventados. |
+| `auth.privy.io/api/v1/sessions` | Las cuentas vinculadas del usuario que mira |
+
+### Cada trader tiene DOS addresses, y no son la misma
+
+Este es el punto que costó entender:
+
+| | econoar |
+|---|---|
+| **Identidad** — `userHandle/…` `address` / `evmAddress` | `HZrxCXCms8…` · `0x0cc1c39d…` |
+| **Ejecución** — sus `swaps[].address` / `.recipient` y `spotlight` | `aX8G1EVfWk…` · `0x300b798feb…` |
+
+La de identidad **no tiene actividad on-chain** (Solscan vacío): es la wallet
+embebida de Privy. La de ejecución aparece en las 55.792 filas de sus propios
+swaps. Falta comprobar en el explorador si esa segunda es de él o es el router
+compartido de FOMO — si tiene millones de transacciones, es el router, y
+entonces las operaciones no son atribuibles por trader en la cadena.
+
+El `userId` de econoar es `c573ebfa-5e98-580c-ae15-c8672f11c151`, y se obtiene
+del perfil: **handle → userId → swaps**. No hace falta ninguna wallet.
+
 ## Estado al 3 sep 2026 — dónde retomar
 
 ### El hallazgo que reordena el proyecto

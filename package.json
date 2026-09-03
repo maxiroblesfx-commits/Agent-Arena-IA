@@ -5,6 +5,7 @@
   "description": "Desk de confluencia encima de FOMO. Alertas + 1-click. Auto off.",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "test": "node --test"
   }
 }

@@ -10,6 +10,7 @@ const paper = require("./lib/paper");
 const PORT = Number(process.env.PORT || 3000);
 const HOST = "0.0.0.0";
 const FOMO_API = "https://api.fomoscope.xyz";
+const FOMOSCAN_API = "https://api.fomoscan.sh";
 const STORE = path.join(__dirname, "data", "store.json");
 const PUBLIC = path.join(__dirname, "docs");
 const JUNK_PNL = 1e12;
@@ -99,7 +100,7 @@ function defaultStore() {
       telegramBot: "", telegramChat: "",
     },
     watchlist: ident.SEED_WATCH.slice(),
-    custom: [], wallets: {}, ledger: [], skipped: [], createdAt: iso(),
+    custom: [], wallets: {}, identities: {}, ledger: [], skipped: [], createdAt: iso(),
   };
 }
 function loadStore() {
@@ -107,6 +108,7 @@ function loadStore() {
   try { s = { ...s, ...JSON.parse(fs.readFileSync(STORE, "utf8")) }; } catch {}
   s.settings = { ...defaultStore().settings, ...(s.settings || {}) };
   if (!s.wallets) s.wallets = {};
+  if (!s.identities) s.identities = {};
   if (!s.watchlist.some((h) => String(h).toLowerCase() === "econoar")) s.watchlist.unshift("econoar");
   s.custom = (s.custom || []).filter((h) => String(h).toLowerCase() !== "econoar");
   return s;
@@ -115,7 +117,8 @@ function saveStore() {
   fs.mkdirSync(path.join(__dirname, "data"), { recursive: true });
   fs.writeFileSync(STORE, JSON.stringify({
     settings: store.settings, watchlist: store.watchlist, custom: store.custom,
-    wallets: store.wallets, ledger: store.ledger, skipped: store.skipped, createdAt: store.createdAt,
+    wallets: store.wallets, identities: store.identities, ledger: store.ledger,
+    skipped: store.skipped, createdAt: store.createdAt,
   }, null, 2));
 }
 
@@ -126,18 +129,186 @@ const state = {
   coOccur: new Map(), invalidations: [], marks: {},
 };
 let store = loadStore();
+// Custom identities survive a server restart while the curated identity graph
+// remains the source of truth for known aliases.
+Object.values(store.identities).forEach((t) => { if (t && t.handle) ident.index(t); });
 const clients = new Set();
+const traderCache = { fetchedAt: 0, items: [] };
+const scanCache = new Map();
 
 function applyWallet(t) {
-  const pasted = store.wallets[t.handle.toLowerCase()];
-  if (pasted) return { ...t, wallet: pasted, walletStatus: "pasted" };
-  return t;
+  const saved = store.wallets[String(t.handle || "").toLowerCase()];
+  if (!saved) return t;
+  // Migration: prior builds stored a bare Solana address as the value.
+  if (typeof saved === "string") return { ...t, wallet: saved, walletStatus: "manual", walletSource: "manual" };
+  return {
+    ...t,
+    wallet: saved.solana || t.wallet || null,
+    evm: saved.evm || t.evm || null,
+    walletStatus: "manual",
+    walletSource: "manual",
+  };
 }
 function watchTraders() {
   return store.watchlist.map((h) => {
-    const t = applyWallet(ident.get(h) || { handle: h, name: h, followers: 0, pnl: 0, wallet: null, walletStatus: "unknown" });
+    const key = String(h || "").toLowerCase();
+    const t = applyWallet(ident.get(h) || store.identities[key] || {
+      handle: h, name: h, followers: 0, pnl: 0, wallet: null, walletStatus: "unknown",
+    });
     return { ...t, forensic: forensic(t) };
   });
+}
+
+function toFomoScanTrader(row) {
+  const handle = ident.parseHandle(row && row.handle);
+  if (!handle) return null;
+  const solana = ident.isSolanaAddress(row.solanaAddress) ? row.solanaAddress : null;
+  const evm = ident.isEvmAddress(row.evmAddress) ? row.evmAddress : null;
+  return {
+    handle,
+    name: row.name || handle,
+    traderId: row.id || null,
+    wallet: solana,
+    evm,
+    walletStatus: solana || evm ? "resolved" : "verified_no_wallet",
+    walletSource: "FomoScan verified identity",
+    identityLevel: "verified",
+    source: "FomoScan /v2/user/handle",
+    fomo: "https://fomo.family/profile/" + encodeURIComponent(handle),
+    resolvedAt: iso(),
+  };
+}
+
+async function fomoScanTrader(handle) {
+  const key = process.env.FOMOSCAN_API_KEY;
+  if (!key) return null;
+  const cacheKey = String(handle).toLowerCase();
+  const cached = scanCache.get(cacheKey);
+  // Each FomoScan lookup consumes credits. Keep both hits and 404s warm so an
+  // impatient retry cannot repeatedly spend the account's quota.
+  if (cached && now() - cached.fetchedAt < 5 * 60 * 1000) return cached.trader;
+  const ac = new AbortController();
+  const timeout = setTimeout(() => ac.abort(), 5000);
+  try {
+    const r = await fetch(FOMOSCAN_API + "/v2/user/handle/" + encodeURIComponent(handle), {
+      headers: { Authorization: "Bearer " + key }, signal: ac.signal,
+    });
+    if (r.status === 404) {
+      scanCache.set(cacheKey, { fetchedAt: now(), trader: null });
+      return null;
+    }
+    if (!r.ok) throw new Error("FomoScan http " + r.status);
+    const trader = toFomoScanTrader(await r.json());
+    scanCache.set(cacheKey, { fetchedAt: now(), trader });
+    return trader;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+function toPublicTrader(row) {
+  const handle = ident.parseHandle(row && row.handle);
+  if (!handle) return null;
+  const address = String(row.walletAddress || row.wallet || "").trim();
+  const solana = ident.isSolanaAddress(address) ? address : null;
+  const evm = ident.isEvmAddress(address) ? address : null;
+  return {
+    handle,
+    name: row.displayName || handle,
+    followers: Number(row.followers) || 0,
+    pnl: Number(row.netPnlUsd) || 0,
+    rank: Number(row.rank) || null,
+    traderId: row.traderId || null,
+    wallet: solana,
+    evm,
+    walletStatus: solana || evm ? "resolved" : "not_found",
+    walletSource: solana || evm ? "FomoScope public tape" : null,
+    identityLevel: "tape",
+    source: "FomoScope /traders public tape",
+    fomo: "https://fomo.family/profile/" + encodeURIComponent(handle),
+    resolvedAt: iso(),
+  };
+}
+
+async function publicTraders(force = false) {
+  // Avoid burning the shared free rate-limit bucket when a user clicks retry.
+  if (!force && traderCache.items.length && now() - traderCache.fetchedAt < 5 * 60 * 1000) return traderCache.items;
+  const ac = new AbortController();
+  const timeout = setTimeout(() => ac.abort(), 5000);
+  try {
+    const headers = {};
+    if (process.env.FOMOSCOPE_API_KEY) headers.Authorization = "Bearer " + process.env.FOMOSCOPE_API_KEY;
+    const r = await fetch(FOMO_API + "/traders?window=7d&limit=100", { headers, signal: ac.signal });
+    if (!r.ok) throw new Error("FomoScope http " + r.status);
+    const body = await r.json();
+    traderCache.items = Array.isArray(body.items) ? body.items : [];
+    traderCache.fetchedAt = now();
+    return traderCache.items;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+function markResolution(handle, status) {
+  const key = String(handle || "").toLowerCase();
+  const existing = ident.get(handle) || store.identities[key];
+  if (!existing) return;
+  const next = { ...existing, handle, walletStatus: status };
+  store.identities[key] = next;
+  ident.index(next);
+  saveStore();
+}
+
+function saveResolvedIdentity(canonical, remote) {
+  const current = store.identities[canonical.toLowerCase()] || {};
+  const merged = { ...current, ...remote, handle: canonical };
+  store.identities[canonical.toLowerCase()] = merged;
+  ident.index(merged);
+  saveStore();
+  return merged;
+}
+
+async function resolvePublicIdentity(handle, force = false) {
+  const canonical = ident.resolve(handle);
+  if (!canonical) return { status: "invalid", handle: "" };
+  const known = ident.get(canonical);
+  if (known && (known.wallet || known.evm)) return { status: "known", handle: known.handle, trader: known };
+
+  // A configured FomoScan key resolves any indexed FOMO profile and returns
+  // proof-verified Solana/EVM addresses. The FomoScope board remains a
+  // keyless fallback for the top public tape.
+  let scanError = null;
+  if (process.env.FOMOSCAN_API_KEY) {
+    try {
+      const scanned = await fomoScanTrader(canonical);
+      if (scanned) {
+        const trader = saveResolvedIdentity(canonical, scanned);
+        return { status: scanned.wallet || scanned.evm ? "resolved" : "verified_no_wallet", handle: canonical, trader };
+      }
+    } catch (error) {
+      scanError = error;
+    }
+  }
+
+  try {
+    const rows = await publicTraders(force);
+    const row = rows.find((item) => String(item && item.handle || "").toLowerCase() === canonical.toLowerCase());
+    if (!row) {
+      markResolution(canonical, "not_found");
+      return { status: "not_found", handle: canonical };
+    }
+    const remote = toPublicTrader(row);
+    if (!remote) {
+      markResolution(canonical, "not_found");
+      return { status: "not_found", handle: canonical };
+    }
+    const trader = saveResolvedIdentity(canonical, remote);
+    return { status: remote.wallet || remote.evm ? "resolved" : "not_found", handle: canonical, trader };
+  } catch (error) {
+    markResolution(canonical, "unavailable");
+    const message = scanError ? String(scanError.message || scanError) + " · " + String(error && error.message || error) : String(error && error.message || error);
+    return { status: "unavailable", handle: canonical, error: message };
+  }
 }
 function tokenByTicker(t) { return TOKENS.find((x) => x.ticker.toLowerCase() === String(t).toLowerCase()); }
 
@@ -499,14 +670,21 @@ const server = http.createServer(async (req, res) => {
     if (url.pathname === "/api/follow" && req.method === "POST") {
       const body = await readBody(req);
       const handle = ident.resolve(body.handle);
-      if (!handle) return json(res, 400, { error: "handle vacío" });
+      if (!handle) return json(res, 400, { error: "Pegá un @handle o una URL de perfil fomo.family válida." });
       if (!store.watchlist.some((h) => h.toLowerCase() === handle.toLowerCase())) {
-        if (!ident.get(handle)) ident.index({ handle, name: handle, followers: 0, pnl: 0, wallet: null, walletStatus: "unknown", custom: true });
-        store.watchlist.unshift(handle); saveStore();
-        const t = ident.get(handle) || { handle };
-        logAgent("SCT", "Follow @" + handle + (t.wallet ? " · " + t.wallet.slice(0, 4) + "…" : " · sin wallet"), "info");
+        if (!ident.get(handle)) {
+          const pending = { handle, name: handle, followers: 0, pnl: 0, wallet: null, walletStatus: "resolving", custom: true };
+          ident.index(pending);
+          store.identities[handle.toLowerCase()] = pending;
+        }
+        store.watchlist.unshift(handle);
+        saveStore();
       }
-      broadcast(); return json(res, 200, snapshot());
+      const resolution = await resolvePublicIdentity(handle);
+      const trader = resolution.trader || ident.get(handle) || {};
+      const suffix = trader.wallet || trader.evm ? " · wallet resuelta" : resolution.status === "verified_no_wallet" ? " · perfil verificado sin address" : resolution.status === "unavailable" ? " · lookup no disponible" : " · sin match público";
+      logAgent("SCT", "Follow @" + handle + suffix, resolution.status === "resolved" || resolution.status === "known" ? "info" : "warn");
+      broadcast(); return json(res, 200, { ...snapshot(), resolution });
     }
     if (url.pathname === "/api/unfollow" && req.method === "POST") {
       const body = await readBody(req);
@@ -514,14 +692,37 @@ const server = http.createServer(async (req, res) => {
       store.watchlist = store.watchlist.filter((h) => h.toLowerCase() !== handle.toLowerCase());
       saveStore(); broadcast(); return json(res, 200, snapshot());
     }
+    if (url.pathname === "/api/resolve" && req.method === "POST") {
+      const body = await readBody(req);
+      const resolution = await resolvePublicIdentity(body.handle, true);
+      if (resolution.status === "invalid") return json(res, 400, { error: "Handle o URL FOMO inválido." });
+      const level = resolution.status === "resolved" || resolution.status === "known" ? "info" : "warn";
+      logAgent("SCT", "Lookup @" + resolution.handle + " · " + resolution.status, level);
+      broadcast(); return json(res, 200, { ...snapshot(), resolution });
+    }
     if (url.pathname === "/api/wallet" && req.method === "POST") {
       const body = await readBody(req);
       const handle = ident.resolve(body.handle);
-      const wallet = String(body.wallet || "").trim();
-      if (!handle || wallet.length < 32) return json(res, 400, { error: "inválido" });
-      store.wallets[handle.toLowerCase()] = wallet;
-      const t = ident.get(handle); if (t) { t.wallet = wallet; t.walletStatus = "pasted"; }
-      saveStore(); broadcast(); return json(res, 200, snapshot());
+      const address = String(body.wallet || "").trim();
+      if (!handle || (!ident.isSolanaAddress(address) && !ident.isEvmAddress(address))) {
+        return json(res, 400, { error: "Pegá una wallet Solana base58 o una EVM 0x válida." });
+      }
+      const key = handle.toLowerCase();
+      const prior = store.wallets[key];
+      const saved = typeof prior === "string" ? { solana: prior } : { ...(prior || {}) };
+      if (ident.isSolanaAddress(address)) saved.solana = address;
+      else saved.evm = address;
+      store.wallets[key] = saved;
+      const t = ident.get(handle);
+      if (t) {
+        if (saved.solana) t.wallet = saved.solana;
+        if (saved.evm) t.evm = saved.evm;
+        t.walletStatus = "manual";
+        t.walletSource = "manual";
+      }
+      saveStore();
+      logAgent("SCT", "Wallet manual vinculada a @" + handle, "info");
+      broadcast(); return json(res, 200, { ...snapshot(), resolution: { status: "manual", handle } });
     }
     if (url.pathname === "/api/settings" && req.method === "POST") {
       const body = await readBody(req);

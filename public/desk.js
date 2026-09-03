@@ -172,8 +172,31 @@ async function post(url, body) {
 }
 
 function walletTag(t) {
-  if (t.wallet) return `<span class="wallet-tag ok">${short(t.wallet)}</span>`;
-  return `<span class="wallet-tag">sin wallet</span>`;
+  const source = t.walletSource === "manual" || t.walletStatus === "manual" ? "manual · "
+    : /FomoScan/i.test(t.walletSource || "") ? "verified · "
+      : /FomoScope/i.test(t.walletSource || "") ? "tape · " : "SOL · ";
+  if (t.wallet) return `<span class="wallet-tag ok" title="${t.wallet}">${source}${short(t.wallet)}</span>`;
+  if (t.evm) return `<span class="wallet-tag ok" title="${t.evm}">EVM · ${short(t.evm)}</span>`;
+  if (t.walletStatus === "resolving") return `<span class="wallet-tag pending">buscando wallet…</span>`;
+  if (t.walletStatus === "unavailable") return `<span class="wallet-tag pending">lookup sin conexión</span>`;
+  if (t.walletStatus === "verified_no_wallet") return `<span class="wallet-tag miss">perfil verificado · sin address</span>`;
+  if (t.walletStatus === "not_found") return `<span class="wallet-tag miss">sin match público</span>`;
+  return `<span class="wallet-tag miss">wallet pendiente</span>`;
+}
+
+function profileUrl(t) {
+  return t.fomo || "https://fomo.family/profile/" + encodeURIComponent(t.handle);
+}
+
+function resolutionMessage(resolution) {
+  if (!resolution) return "Watchlist actualizada.";
+  const handle = "@" + (resolution.handle || "trader");
+  if (resolution.status === "resolved" || resolution.status === "known") return handle + " · wallet pública resuelta.";
+  if (resolution.status === "manual") return handle + " · wallet vinculada.";
+  if (resolution.status === "verified_no_wallet") return handle + " · perfil verificado, sin wallet pública disponible todavía.";
+  if (resolution.status === "not_found") return handle + " · no hubo match en el tape público. Podés pegar una wallet verificada.";
+  if (resolution.status === "unavailable") return handle + " · el lookup no respondió; reintentá o pegá la wallet.";
+  return resolution.error || "No pude resolver ese perfil.";
 }
 
 function legsHtml(q, title) {
@@ -227,27 +250,38 @@ function renderDesk(s) {
 
   $("watch").innerHTML = s.watchlist.map((t) => {
     const display = t.name && t.name !== t.handle ? t.name : "@" + t.handle;
+    const solscan = t.wallet ? `<a class="btn ghost tiny" href="https://solscan.io/account/${t.wallet}" target="_blank" rel="noopener">Solscan</a>` : "";
+    const explorer = t.evm ? `<a class="btn ghost tiny" href="https://etherscan.io/address/${t.evm}" target="_blank" rel="noopener">EVM</a>` : "";
     return `<article class="person ${t.kol ? "kol" : ""}">
       <div class="av">${(t.name || t.handle).slice(0, 2).toUpperCase()}</div>
       <div>
         <div class="name">${display}</div>
         <div class="handle">@${t.handle}${t.identityLevel ? " · " + t.identityLevel : ""}</div>
         <div class="meta">${t.followers || 0} follows · ${t.pnl ? fmt(t.pnl) : "PnL n/d"}</div>
-        ${walletTag(t)} ${t.evm ? `<span class="wallet-tag">${short(t.evm)}</span>` : ""}
+        ${walletTag(t)} ${t.evm && t.wallet ? `<span class="wallet-tag" title="${t.evm}">EVM · ${short(t.evm)}</span>` : ""}
         ${t.note ? `<div class="meta">${t.note}</div>` : ""}
       </div>
       <div style="text-align:right">
         <div class="grade ${gClass(t.forensic.grade)}">${t.forensic.grade}</div>
-        <button class="x" data-un="${t.handle}">×</button>
+        <button class="x" data-un="${t.handle}" title="dejar de seguir" aria-label="Dejar de seguir @${t.handle}">×</button>
       </div>
       <div class="actions">
-        ${t.wallet ? `<a class="btn ghost tiny" href="https://solscan.io/account/${t.wallet}" target="_blank" rel="noopener">solscan</a>` : ""}
-        ${t.fomo ? `<a class="btn ghost tiny" href="${t.fomo}" target="_blank" rel="noopener">FOMO</a>` : ""}
+        ${solscan}${explorer}
+        <a class="btn ghost tiny" href="${profileUrl(t)}" target="_blank" rel="noopener">FOMO</a>
+        ${t.wallet || t.evm ? "" : `<button class="btn ghost tiny" data-resolve="${t.handle}" type="button">buscar wallet</button>`}
       </div>
+      <details class="wallet-editor">
+        <summary>${t.wallet || t.evm ? "agregar o corregir wallet" : "pegar wallet verificada"}</summary>
+        <form class="wallet-link" data-wallet-form data-handle="${t.handle}">
+          <input name="wallet" placeholder="SOL base58 o EVM 0x…" autocomplete="off" aria-label="Wallet de @${t.handle}" />
+          <button class="btn tiny" type="submit">vincular</button>
+        </form>
+      </details>
     </article>`;
   }).join("");
 
-  const cards = s.cards.filter((c) => c.action === "alert" || c.action === "block").slice(0, 8);
+  const cards = s.cards.filter((c) => c.action === "alert" || c.action === "block").slice(0, 12);
+  $("radarN").textContent = String(cards.length);
   $("cards").innerHTML = cards.length ? cards.map((c) => {
     const hot = c.action === "alert" && c.status === "live";
     const cls = c.action === "block" ? "block" : c.status === "clicked" ? "clicked" : hot ? "hot" : "";
@@ -258,9 +292,10 @@ function renderDesk(s) {
     return `<article class="card ${cls}">
       <div class="row">
         <div class="ticker">$${c.ticker}</div>
-        <span class="pill ${c.action === "alert" ? "a" : "r"}">${c.action === "alert" ? "CONFLUENCE " + c.n : "VETO"}</span>
+        <span class="pill ${c.action === "alert" ? "a" : "r"}">${c.action === "alert" ? "N=" + c.n : "VETO"}</span>
       </div>
-      <div class="copy">${names}<br>${c.spanSec}s · score ${c.score} · indep ${(c.indep || 0).toFixed(2)} · ${c.thesis ? "tesis" : "ape mudo"}</div>
+      <div class="card-metrics"><span>${c.spanSec}s ventana</span><span>score ${c.score}</span><span>indep ${(c.indep || 0).toFixed(2)}</span></div>
+      <div class="copy"><strong>${names}</strong> · ${c.thesis ? "con tesis" : "ape mudo"}</div>
       <div class="pills">
         <span class="pill ${c.rug && c.rug.risk === "LOW" ? "g" : "w"}">${(c.rug && c.rug.risk) || "?"}</span>
         ${m.mintRevoked ? `<span class="pill g">mint rev</span>` : `<span class="pill r">mint open</span>`}
@@ -269,7 +304,7 @@ function renderDesk(s) {
         ${c.size ? `<span class="pill a">${c.size.pct}% · ${fmt(c.size.usd)}</span>` : ""}
         ${m.tax ? `<span class="pill r">tax ${m.tax}%</span>` : `<span class="pill g">tax 0</span>`}
       </div>
-      ${q ? legsHtml(q, "Ticket paper si comprás ahora") : ""}
+      ${q ? `<details class="card-ticket"><summary>paper · fees ${fmt(q.totalFees)} · neto ${fmt(q.net)}</summary>${legsHtml(q, "Ticket completo")}</details>` : ""}
       <div class="actions">
         <button class="btn" data-buy="${c.id}" ${disabled ? "disabled" : ""}>PAPER BUY</button>
         <button class="btn ghost" data-skip="${c.id}" ${disabled ? "disabled" : ""}>snooze</button>
@@ -277,12 +312,20 @@ function renderDesk(s) {
     </article>`;
   }).join("") : `<div class="empty">Esperando cluster. Un ape solo no es señal.</div>`;
 
-  $("tape").innerHTML = s.tape.slice(0, 22).map((e) => `
-    <div class="tape-item">
-      <div class="side ${e.side}">${(e.side || "buy").toUpperCase()}</div>
-      <div><div class="who">${e.name && e.name !== e.handle ? e.name : "@" + e.handle} <span>$${e.ticker}</span></div></div>
-      <div class="amt">${e.usd ? fmt(e.usd) : ""}<br>${ago(e.ts)}</div>
-    </div>`).join("");
+  const tape = s.tape.slice(0, 36);
+  $("tapeN").textContent = String(tape.length);
+  $("tape").innerHTML = tape.map((e) => {
+    const side = e.side || "buy";
+    const label = side === "thesis" ? "TESIS" : side.toUpperCase();
+    const who = e.name && e.name !== e.handle ? e.name : "@" + e.handle;
+    const amount = e.usd ? fmt(e.usd) : "nota";
+    return `<article class="tape-item ${side}">
+      <div class="side ${side}">${label}</div>
+      <div class="tape-token">$${e.ticker}</div>
+      <div class="tape-who" title="${who}"><b>${who}</b>${e.thesis ? " · " + e.thesis : ""}</div>
+      <div class="amt">${amount}<br>${ago(e.ts)}</div>
+    </article>`;
+  }).join("") || `<div class="empty">Esperando tape.</div>`;
 
   $("pane-pocket").innerHTML = s.pocket.length ? s.pocket.map((p) => `
     <article class="pk ${p.kind}">
@@ -411,8 +454,33 @@ $("followForm").addEventListener("submit", async (e) => {
   e.preventDefault();
   const handle = e.target.handle.value.trim();
   if (!handle) return;
-  await post("/api/follow", { handle });
-  e.target.reset();
+  try {
+    const data = await post("/api/follow", { handle });
+    if (data.error) { toast(data.error); return; }
+    lastState = data;
+    render(data);
+    toast(resolutionMessage(data.resolution));
+    e.target.reset();
+  } catch {
+    toast("No pude agregar el perfil. Reintentá en unos segundos.");
+  }
+});
+
+document.body.addEventListener("submit", async (e) => {
+  const form = e.target.closest("[data-wallet-form]");
+  if (!form) return;
+  e.preventDefault();
+  const wallet = form.elements.wallet.value.trim();
+  if (!wallet) return;
+  try {
+    const data = await post("/api/wallet", { handle: form.dataset.handle, wallet });
+    if (data.error) { toast(data.error); return; }
+    lastState = data;
+    render(data);
+    toast(resolutionMessage(data.resolution));
+  } catch {
+    toast("No pude vincular la wallet. Verificá la dirección y reintentá.");
+  }
 });
 
 $("cfgForm").addEventListener("input", () => { cfgDirty = true; previewCfg(); });
@@ -465,9 +533,18 @@ document.body.addEventListener("click", async (e) => {
   const chain = e.target.getAttribute("data-chain");
   if (chain) { await post("/api/chain", { chain }); return; }
   const un = e.target.getAttribute("data-un");
+  const resolve = e.target.getAttribute("data-resolve");
   const buy = e.target.getAttribute("data-buy");
   const skip = e.target.getAttribute("data-skip");
   const close = e.target.getAttribute("data-close");
+  if (resolve) {
+    try {
+      const data = await post("/api/resolve", { handle: resolve });
+      if (data.error) toast(data.error);
+      else { lastState = data; render(data); toast(resolutionMessage(data.resolution)); }
+    } catch { toast("El lookup no respondió. Podés pegar una wallet verificada."); }
+    return;
+  }
   if (un) await post("/api/unfollow", { handle: un });
   if (skip) await post("/api/click", { cardId: skip, action: "skip" });
   if (close) {

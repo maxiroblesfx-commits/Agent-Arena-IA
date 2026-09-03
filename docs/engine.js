@@ -35,6 +35,22 @@
   const clamp = (n, a, b) => Math.max(a, Math.min(b, n));
   const round2 = (n) => Math.round(n * 100) / 100;
   const now = () => Date.now();
+  const isSolanaAddress = (value) => /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(String(value || "").trim());
+  const isEvmAddress = (value) => /^0x[a-fA-F0-9]{40}$/.test(String(value || "").trim());
+  function parseHandle(raw) {
+    let value = String(raw || "").trim();
+    if (!value) return "";
+    if (/^(?:https?:\/\/)?(?:www\.)?fomo\.family(?:\/|$)/i.test(value)) {
+      try {
+        const url = new URL(/^https?:\/\//i.test(value) ? value : "https://" + value);
+        const parts = url.pathname.split("/").filter(Boolean);
+        const marker = parts.findIndex((part) => /^(profile|r)$/i.test(part));
+        value = marker >= 0 ? (parts[marker + 1] || "") : (parts[0] || "");
+      } catch { return ""; }
+    }
+    value = value.replace(/^@+/, "").trim().replace(/[/?#].*$/, "");
+    return /^[a-zA-Z0-9_.-]{1,64}$/.test(value) ? value : "";
+  }
   const iso = (t) => new Date(t || now()).toISOString();
   const uid = (p) => p + "_" + Math.random().toString(36).slice(2, 8);
   const pick = (a) => a[Math.floor(Math.random() * a.length)];
@@ -91,10 +107,13 @@
     fomoFeeMode: "flat", fomoFlatUsd: 1, fomoPct: 0.005,
     dexFeePct: 0.0025, priorityFeeUsd: 0.02, minSlipPct: 0.15, maxSlippagePct: 3,
   };
-  let store = { settings: { ...defaults }, watchlist: SEED.map((t) => t.handle), ledger: [] };
+  let store = { settings: { ...defaults }, watchlist: SEED.map((t) => t.handle), wallets: {}, ledger: [] };
   try {
     const raw = JSON.parse(localStorage.getItem("cx.pages.store") || "null");
-    if (raw) store = { settings: { ...defaults, ...(raw.settings || {}) }, watchlist: raw.watchlist || store.watchlist, ledger: raw.ledger || [] };
+    if (raw) store = {
+      settings: { ...defaults, ...(raw.settings || {}) }, watchlist: raw.watchlist || store.watchlist,
+      wallets: raw.wallets || {}, ledger: raw.ledger || [],
+    };
   } catch {}
   function save() { localStorage.setItem("cx.pages.store", JSON.stringify(store)); }
 
@@ -107,9 +126,15 @@
   function pocket(kind, title, body, extra) {
     state.pocket.unshift({ id: uid("pk"), kind, title, body, extra: extra || {}, at: iso(), ts: now() });
   }
+  function applyWallet(t) {
+    const saved = store.wallets[String(t.handle || "").toLowerCase()];
+    if (!saved) return t;
+    if (typeof saved === "string") return { ...t, wallet: saved, walletStatus: "manual", walletSource: "manual" };
+    return { ...t, wallet: saved.solana || t.wallet || null, evm: saved.evm || t.evm || null, walletStatus: "manual", walletSource: "manual" };
+  }
   function watchTraders() {
     return store.watchlist.map((h) => {
-      const t = CAT.get(h.toLowerCase()) || { handle: h, name: h, followers: 0, pnl: 0, wallet: null };
+      const t = applyWallet(CAT.get(h.toLowerCase()) || { handle: h, name: h, followers: 0, pnl: 0, wallet: null, walletStatus: "unknown" });
       return { ...t, forensic: forensic(t) };
     });
   }
@@ -229,15 +254,40 @@
   function post(path, body) {
     body = body || {};
     if (path === "/api/follow") {
-      const h = String(body.handle || "").replace(/^@/, "").replace(/^https?:\/\/fomo\.family\/(profile|r)\//i, "");
-      if (h && !store.watchlist.some((x) => x.toLowerCase() === h.toLowerCase())) {
-        if (!CAT.has(h.toLowerCase())) CAT.set(h.toLowerCase(), { handle: h, name: h, followers: 0, pnl: 0, wallet: null });
+      const h = parseHandle(body.handle);
+      if (!h) return { error: "Pegá un @handle o una URL de perfil fomo.family válida." };
+      if (!store.watchlist.some((x) => x.toLowerCase() === h.toLowerCase())) {
+        if (!CAT.has(h.toLowerCase())) CAT.set(h.toLowerCase(), { handle: h, name: h, followers: 0, pnl: 0, wallet: null, walletStatus: "not_found" });
         store.watchlist.unshift(h); save();
       }
+      const trader = CAT.get(h.toLowerCase());
+      return { ...emit(), resolution: { status: trader && (trader.wallet || trader.evm) ? "known" : "not_found", handle: h } };
     }
     if (path === "/api/unfollow") {
-      const h = String(body.handle || "").replace(/^@/, "").toLowerCase();
+      const h = parseHandle(body.handle).toLowerCase();
       store.watchlist = store.watchlist.filter((x) => x.toLowerCase() !== h); save();
+    }
+    if (path === "/api/resolve") {
+      const h = parseHandle(body.handle);
+      if (!h) return { error: "Handle o URL FOMO inválido." };
+      const trader = CAT.get(h.toLowerCase());
+      return { ...emit(), resolution: { status: trader && (trader.wallet || trader.evm) ? "known" : "not_found", handle: h } };
+    }
+    if (path === "/api/wallet") {
+      const h = parseHandle(body.handle);
+      const address = String(body.wallet || "").trim();
+      if (!h || (!isSolanaAddress(address) && !isEvmAddress(address))) return { error: "Pegá una wallet Solana base58 o una EVM 0x válida." };
+      const key = h.toLowerCase();
+      const prior = store.wallets[key];
+      const saved = typeof prior === "string" ? { solana: prior } : { ...(prior || {}) };
+      if (isSolanaAddress(address)) saved.solana = address; else saved.evm = address;
+      store.wallets[key] = saved;
+      const trader = CAT.get(key) || { handle: h, name: h, followers: 0, pnl: 0, wallet: null };
+      if (saved.solana) trader.wallet = saved.solana;
+      if (saved.evm) trader.evm = saved.evm;
+      trader.walletStatus = "manual"; trader.walletSource = "manual";
+      CAT.set(key, trader); save();
+      return { ...emit(), resolution: { status: "manual", handle: h } };
     }
     if (path === "/api/chain") { store.settings.chain = body.chain || "solana"; save(); }
     if (path === "/api/settings") {

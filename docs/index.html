@@ -41,7 +41,7 @@
               <button class="icon" data-collapse="colWatch" type="button">–</button>
             </div>
             <form class="follow" id="followForm">
-              <input name="handle" placeholder="@handle o fomo.family/profile/…" autocomplete="off" />
+              <input name="handle" placeholder="@handle o URL fomo.family/profile/…" autocomplete="off" aria-label="Handle o perfil FOMO" />
               <button class="btn" type="submit">seguir</button>
             </form>
             <div class="note" id="econoarNote"><b>Scout encontró a eric.eth.</b></div>
@@ -53,7 +53,7 @@
           <div class="slot" id="slot-b">
             <section class="col" id="colRadar" data-panel="radar">
               <div class="hd" draggable="true" data-drag="radar">
-                <span class="grab">⋮⋮</span> Radar
+                <span class="grab">⋮⋮</span> Radar <span class="panel-count" id="radarN">0</span>
                 <button class="icon" data-collapse="colRadar" type="button">–</button>
               </div>
               <div class="scroll" id="cards"></div>
@@ -63,7 +63,7 @@
           <div class="slot" id="slot-c">
             <section class="col" id="colTape" data-panel="tape">
               <div class="hd" draggable="true" data-drag="tape">
-                <span class="grab">⋮⋮</span> Tape
+                <span class="grab">⋮⋮</span> Tape <span class="panel-count" id="tapeN">0</span>
                 <button class="icon" data-collapse="colTape" type="button">–</button>
               </div>
               <div class="scroll" id="tape"></div>
@@ -177,7 +177,7 @@
       </div>
     </div>
   </div>
-  <div class="toast" id="toast"></div>
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
   <script src="engine.js"></script>
   <script src="desk.js"></script>
 </body>

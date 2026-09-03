@@ -7,6 +7,7 @@ Desk de señales encima de FOMO. No es otro exchange.
 ## Qué hace
 
 - Watchlist de handles FOMO (semilla pública + los que pegues)
+- Resolver de wallet pública: pegás `@handle` o una URL `fomo.family/profile/...`; el desk busca el match en el tape público y conserva la fuente
 - Scout resolvió `@econoar` = eric.eth (SOL + EVM)
 - Forensic veta PnL imposible
 - Motor de confluencia: N wallets independientes, misma ventana, mismo token
@@ -44,7 +45,19 @@ Abre `http://localhost:3000` (o `0.0.0.0:3000` en el host).
 
 Vistas: **Desk** · **Paper** · **Config**.
 
-Si `api.fomoscope.xyz` es alcanzable, el tape es live. Si no, corre snapshot + sim con traders y tokens reales verificados el 2026-09-02.
+Si `api.fomoscope.xyz` es alcanzable, el tape es live. Si no, corre snapshot + sim con traders y tokens reales verificados el 2026-09-02. `FOMOSCOPE_API_KEY` es opcional: sin key usa el bucket público; con key tiene una cuota propia. Para resolver cualquier perfil indexado por FomoScan, configurá opcionalmente `FOMOSCAN_API_KEY`; sin ella se usa el board público de FomoScope como fallback.
+
+## Handles y wallets
+
+Pegá un `@handle`, el link completo `https://fomo.family/profile/handle` (también acepta links con query o `www`) o un share link. En el modo Node, Scout usa FomoScan si existe `FOMOSCAN_API_KEY` (resolución exacta de perfiles indexados) y, sin key, consulta el board público de FomoScope. La tarjeta muestra si fue resuelta, si el perfil fue verificado pero no tiene una address pública, si no hubo match público, o si el lookup estuvo temporalmente caído; ya no muestra un ambiguo “sin wallet”.
+
+FOMO no publica todas las wallets de todos los perfiles. Si un handle no aparece en el tape público, abrí **pegar wallet verificada** en esa tarjeta y pegá una address Solana o EVM pública: queda asociada solo en tu `data/store.json` (o en el `localStorage` de GitHub Pages). Nunca pegues una seed phrase ni una private key.
+
+En GitHub Pages no hay servidor para consultar el resolver en segundo plano, pero se aceptan correctamente links FOMO y el vínculo manual de wallets funciona y queda persistido en ese navegador.
+
+## Radar y Tape densos
+
+Radar ahora usa una grilla de tarjetas compactas y Tape usa microtarjetas: se muestran hasta 12 oportunidades y 36 eventos en el mismo espacio. El resumen deja visibles señal, riesgo, size, fees y neto; abrí **paper · fees…** para ver el ticket completo sin perder densidad.
 
 ## Paper
 

@@ -1,7 +1,7 @@
 name: github-pages
 on:
   push:
-    branches: [arena/01a062a6-agent-arena-ia]
+    branches: [arena/01a064df-agent-arena-ia]
   workflow_dispatch:
 permissions:
   contents: read

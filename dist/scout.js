@@ -2,6 +2,9 @@
 "use strict";
 /* Scout — puntúa traders con su historial público, en Hyperliquid y en Solana.
  * Archivo único: no hay que instalar ni clonar nada. Node 18 o superior.
+ *
+ * Si Solana no devuelve nada, el RPC público puede ser el problema:
+ *   SOLANA_RPC=<url-de-otro-rpc> node scout.js <address>
  */
 const fs = require("fs");
 const AYUDA = [
@@ -9,10 +12,9 @@ const AYUDA = [
   "",
   "  node scout.js 0xAddressEVM        perpetuos en Hyperliquid",
   "  node scout.js AddressDeSolana     swaps en Solana",
-  "  node scout.js --days 180 --lag 0xA --json out.json",
-  "  node scout.js --max 600 AddressDeSolana    (cuántas transacciones leer)",
+  "  node scout.js --days 180 --max 600 <address>",
   "",
-  "Acepta addresses, no handles.",
+  "Variables: SOLANA_RPC para usar otro RPC · HL_API para Hyperliquid.",
 ].join("\n");
 
 /** Cliente de la API pública de Hyperliquid.
@@ -641,10 +643,36 @@ async function scoutSolana(address, target, opts) {
   } catch (e) {
     return { target, status: "error", address, note: "RPC de Solana: " + e.message };
   }
+  // Tres situaciones distintas que antes se informaban igual. Distinguirlas
+  // es lo que dice si el problema es la address, la ventana, o el RPC.
+  if (!firmas.length) {
+    return { target, status: "sin-historial", address, note:
+      "el RPC no devolvió NINGUNA transacción para esta address.\n" +
+      "    Dos causas posibles, y se distinguen en 10 segundos:\n" +
+      `    1. abrí https://solscan.io/account/${address}\n` +
+      "       si el explorador SÍ muestra actividad, el problema es el RPC:\n" +
+      "       el público (api.mainnet-beta.solana.com) no indexa historial completo.\n" +
+      "       Probá con otro:  SOLANA_RPC=<url> node scout.js …\n" +
+      "    2. si el explorador tampoco muestra nada, esta no es su wallet de trading.\n" +
+      "       FOMO usa wallets embebidas de Privy: la address del perfil puede ser\n" +
+      "       la de identidad y no desde la que se firman los swaps." };
+  }
+
+  const sinFecha = firmas.filter((f) => !f.blockTime).length;
+  if (sinFecha === firmas.length) {
+    return { target, status: "rpc-sin-fechas", address, firmas: firmas.length, note:
+      `el RPC devolvió ${firmas.length} transacciones pero ninguna con fecha, así que no se\n` +
+      "    puede filtrar por ventana. Es una limitación de ese RPC — probá con otro:\n" +
+      "    SOLANA_RPC=<url> node scout.js …" };
+  }
+
   const enVentana = firmas.filter((f) => (f.blockTime || 0) * 1000 >= desde);
   if (!enVentana.length) {
-    return { target, status: "sin-actividad", address,
-      note: `sin transacciones en los últimos ${opts.days} días.` };
+    const masVieja = Math.max(...firmas.map((f) => f.blockTime || 0)) * 1000;
+    return { target, status: "sin-actividad-reciente", address, firmas: firmas.length, note:
+      `hay ${firmas.length} transacciones, pero ninguna en los últimos ${opts.days} días.\n` +
+      `    La más reciente es del ${masVieja ? new Date(masVieja).toISOString().slice(0, 10) : "?"}.\n` +
+      "    Ampliá la ventana con --days." };
   }
 
   process.stdout.write(`  leyendo ${enVentana.length} transacciones de Solana`);

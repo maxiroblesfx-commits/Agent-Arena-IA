@@ -125,3 +125,34 @@ test("no mezcla dos tokens distintos", () => {
   assert.equal(eps.length, 1, "solo cerró uno");
   assert.equal(eps[0].coin, TOKEN);
 });
+
+const { scoutOne } = require("../tools/scout");
+const solmod = require("../tools/sol");
+
+/** Sustituye signatures() por una respuesta fija, sin tocar la red. */
+async function conFirmas(firmas, opts = {}) {
+  const orig = solmod.signatures;
+  solmod.signatures = async () => firmas;
+  try { return await scoutOne("HZrxCXCms81ryxwvYNycwcPmynXmPgcKV4C2FeDJA86e", { days: 90, ...opts }); }
+  finally { solmod.signatures = orig; }
+}
+
+test("cero firmas: avisa que puede ser el RPC o la address equivocada", async () => {
+  const r = await conFirmas([]);
+  assert.equal(r.status, "sin-historial");
+  assert.match(r.note, /solscan/, "da el modo de comprobarlo");
+  assert.match(r.note, /Privy/, "menciona la otra causa posible");
+});
+
+test("firmas sin fecha: culpa al RPC, no a la address", async () => {
+  const r = await conFirmas([{ signature: "a" }, { signature: "b" }]);
+  assert.equal(r.status, "rpc-sin-fechas");
+  assert.equal(r.firmas, 2);
+});
+
+test("firmas viejas: dice cuándo fue la última en vez de decir que no hay nada", async () => {
+  const hace200dias = Math.floor((Date.now() - 200 * 86400000) / 1000);
+  const r = await conFirmas([{ signature: "a", blockTime: hace200dias }]);
+  assert.equal(r.status, "sin-actividad-reciente");
+  assert.match(r.note, /--days/, "sugiere ampliar la ventana");
+});

@@ -11,7 +11,7 @@ const PORT = Number(process.env.PORT || 3000);
 const HOST = "0.0.0.0";
 const FOMO_API = "https://api.fomoscope.xyz";
 const STORE = path.join(__dirname, "data", "store.json");
-const PUBLIC = path.join(__dirname, "public");
+const PUBLIC = path.join(__dirname, "docs");
 const JUNK_PNL = 1e12;
 
 const TOKENS = [

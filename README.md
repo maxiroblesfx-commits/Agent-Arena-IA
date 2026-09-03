@@ -17,7 +17,24 @@ Desk de señales encima de FOMO. No es otro exchange.
 - Blotter de operaciones y config de capital/fees
 - Paneles arrastrables y redimensionables
 
-## Cómo correr
+## Publicar en GitHub Pages (link público)
+
+El repo arranca **privado**: GitHub Pages no sirve sitios privados sin plan Pro, y este bot no puede cambiar visibilidad ni prender Pages.
+
+En GitHub, vos:
+
+1. **Settings → General → Danger zone → Change repository visibility → Public**
+2. **Settings → Pages → Build and deployment**
+   - Source: **GitHub Actions**
+3. **Actions → github-pages → Run workflow** (o un push a esta rama)
+
+Queda en:
+
+**https://maxiroblesfx-commits.github.io/Agent-Arena-IA/**
+
+Ahí el desk corre en el navegador (paper FOMO+DEX+tax+slip, sin Node).
+
+## Cómo correr local
 
 ```bash
 node server.js

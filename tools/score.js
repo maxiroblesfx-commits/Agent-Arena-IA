@@ -68,7 +68,7 @@ function episodes(fills) {
         const flipped = before !== 0 && after !== 0 && Math.sign(before) !== Math.sign(after);
         if (after === 0 || flipped) {
           out.push(finish(ep));
-          ep = flipped ? newEpisode(coin, f, after) : null;
+          ep = flipped ? newEpisode(coin, f) : null;
           if (ep) { ep.notional += Math.abs(after) * num(f.px); ep.entryFills = 1; }
         }
       }
@@ -80,11 +80,11 @@ function episodes(fills) {
   return out;
 }
 
-function newEpisode(coin, f, sizeOverride) {
+function newEpisode(coin, f) {
   return {
     coin, openTime: f.time, closeTime: f.time,
     pnl: 0, fees: 0, fills: 0, entryFills: 0,
-    notional: sizeOverride === undefined ? 0 : 0,
+    notional: 0,
     liquidated: false,
   };
 }

@@ -17,7 +17,7 @@ en que varios coinciden**— y poder actuar de un click desde el celular.
 
 - **GitHub:** `maxiroblesfx-commits/Agent-Arena-IA`
 - **Rama:** `claude/agent-arena-ia-continue-65p45l` (todo el trabajo está ahí; `main` está vacío)
-- Node, sin dependencias. `node --test` → 58 tests, todos pasan.
+- Node, sin dependencias. `node --test` → 62 tests, todos pasan.
 - Leé el **README** completo antes de tocar nada: tiene el mapa de la API y el
   estado actual.
 
@@ -71,14 +71,31 @@ Opera memecoins de Solana.
 | econoar | |
 |---|---|
 | **Identidad** (`userHandle/…` → `address`) | `HZrxCXCms81ryxwvYNycwcPmynXmPgcKV4C2FeDJA86e` — **Solscan vacío** |
-| **Ejecución** (sus `swaps[].address`) | `aX8G1EVfWkRneHwWJN6RUecyGcXBYpz42yeKFa1rKiJ` — sin verificar |
+| **Ejecución** (sus `swaps[].address`) | `aX8G1EVfWkRneHwWJN6RUecyGcXBYpz42yeKFa1rKiJ` — **Solscan también vacío, confirmado 2026-09-03** |
 
 La de identidad es la wallet embebida de **Privy** y no tiene actividad on-chain.
-Los swaps se firman desde otro lado (FOMO ejecuta en Solana vía **Jito**).
+**La de ejecución tampoco tiene ni un solo trade en Solscan** — no es que haga
+falta un RPC mejor, esta address simplemente no aparece firmando transacciones
+Solana de la forma en que `tools/sol.js` sabe leer.
 
-**Consecuencia:** seguir a estos traders mirando la cadena **no funciona**. Su
-actividad no es individualmente atribuible on-chain. La única fuente que los
-separa uno por uno es la API de FOMO.
+**Consecuencia:** seguir a estos traders mirando la cadena **no funciona**, punto
+final. `tools/sol.js` y el modo `scoutSolana` de `tools/scout.js` son un callejón
+sin salida para este trader — no vale la pena seguir invirtiendo ahí. La única
+fuente que los separa uno por uno es la API de FOMO.
+
+**7. La forma real de un swap de FOMO, confirmada 2026-09-03 (pegada desde la
+consola en el perfil de econoar):** no es "SOL vs token". Está financiado en
+**USDC de Solana**, ejecutado por un provider llamado `RELAY`, contra un token
+identificado con una address estilo `0x...` y `networkId=4663` — que no es
+ningún chain EVM real que se pueda reconocer. Sin más ejemplos no se puede
+confirmar qué es ese id; queda anotado como no verificado, no se asume nada.
+
+Lo que sí sirve mucho: `humanUsdAmountIn` / `humanUsdAmountOut` ya vienen en
+dólares realizados, con el slippage de la ruta adentro — no hace falta ir a
+buscar precio histórico aparte para calcular P&L. El normalizador está en
+`lib/fomoSwaps.js`, con los dos ejemplos reales como test (`test/fomoSwaps.test.js`).
+Reconstruye episodios reusando `episodesFromSwaps()` de `tools/score.js` (el
+campo se llama `sol` por compatibilidad, pero acá son dólares).
 
 **6. Se mapeó la API real de FOMO** observando qué llama la propia app. Está
 documentada en el README. Lo clave:
@@ -106,6 +123,7 @@ El userId de econoar es `c573ebfa-5e98-580c-ae15-c8672f11c151`.
 | `tools/breakeven.js` | Cuánto tiene que subir el token para no perder |
 | `tools/browser/find-wallet.js` | Snippet de consola: saca addresses y endpoints del navegador |
 | `tools/browser/export-swaps.js` | Snippet de consola: exporta el historial de operaciones |
+| `lib/fomoSwaps.js` | Normaliza un swap crudo de FOMO (USDC↔token vía RELAY) a episodios |
 | `dist/scout.js` | Todo el scout en un archivo, sin instalar nada |
 
 Los snippets de `tools/browser/` van en la **consola del navegador** (F12) estando
@@ -113,13 +131,24 @@ en el perfil de FOMO. Todo lo que empieza con `node` va en PowerShell.
 
 ## El próximo paso concreto
 
-1. Abrir `https://solscan.io/account/aX8G1EVfWkRneHwWJN6RUecyGcXBYpz42yeKFa1rKiJ`
-   - **Cientos de transacciones** → es la wallet real de econoar, se puede seguir on-chain.
-   - **Millones** → es el router compartido de FOMO, y la API de FOMO queda como única fuente.
-2. Correr `tools/browser/export-swaps.js` en su perfil → `muestra()` para ver la
-   forma real de un swap, después `exportar()`.
-3. Con esa forma a la vista, escribir el normalizador y sacar por fin su
-   **edge × copiabilidad** con datos reales.
+Ya está confirmado que la cadena no sirve (punto 5) y ya está el normalizador
+(`lib/fomoSwaps.js`, punto 7) probado con 2 swaps reales. Falta volumen:
+
+1. Correr `tools/browser/export-swaps.js` → `exportar()` en el perfil de
+   econoar para bajar su historial completo (se necesitan ≥30 operaciones
+   cerradas — `tools/score.js` se niega a puntuar con menos).
+2. Pasar ese export por `lib/fomoSwaps.js` → `episodesFromSwaps()` de
+   `tools/score.js` y correr `edgeScore`/`copyScore` con datos reales.
+3. Ojo con los swaps que `normalize()` devuelve `null` (token↔token, o
+   ninguna pata en USDC/USDT): contarlos y decir cuántos quedaron afuera, no
+   descartarlos en silencio — si son muchos, el normalizador está incompleto
+   y hay que mirar esos casos antes de confiar en el puntaje.
+
+Nota de entorno: si algún día seguís esto desde un sandbox con red
+restringida (como esta sesión), `fomo.family`, `prod-api.fomo.family` y
+cualquier RPC/explorer de Solana pueden estar bloqueados por política de
+egress — no es un bug del código, hay que conseguir los datos desde afuera
+(navegador logueado) y pegarlos.
 
 ## Cómo quiero que trabajes
 

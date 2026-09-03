@@ -82,3 +82,30 @@ Ida y vuelta. El PnL es mark menos esas fees.
 - Bankroll paper $1,000 · 1.5% por tarjeta
 - Max 4 abiertas · max −8% día
 - El LLM no firma transacciones
+
+## Scout — puntuar traders con datos reales
+
+`tools/scout.js` reemplaza el puntaje `forensic()` (que medía popularidad:
+KOL, followers, wallet resuelta) por dos métricas que se **multiplican**:
+
+- **Edge** — ¿gana plata, o tuvo suerte? Expectativa neta por operación,
+  concentración del PnL en las 3 mejores, drawdown, aciertos, liquidaciones.
+- **Copiabilidad** — ¿te queda algo de ese edge? Tenencia mediana, si entra
+  escalonado o de un golpe, y el costo medido de llegar un minuto tarde.
+
+Se multiplican porque un trader excelente que entra y sale en 40 segundos es
+incopiable: su PnL es real y tu copia da negativo.
+
+```bash
+node tools/scout.js 0xAddress1 0xAddress2      # puntúa y rankea
+node tools/scout.js --days 180 --lag 0xAddr    # más historial + medir demora
+node tools/scout.js --json scout.json 0xAddr   # vuelca todo
+```
+
+Todo sale del historial público de Hyperliquid (`/info`, sin API key). No hay
+un solo número escrito a mano, y con menos de 30 operaciones cerradas **se
+niega a puntuar** en vez de inventar una nota.
+
+**Acepta addresses, no handles.** FOMO no publica un resolver de handles: abrí
+el perfil, copiá la address pública y pegala. Una address de Solana se reporta
+como fuera de alcance — esa pata necesita un indexador con key, no Hyperliquid.

@@ -143,12 +143,50 @@ De los 101 swaps reales, los 101 se pudieron clasificar (ninguno cayó en
 token↔token sin stable de por medio). Pero la ventana era corta —1 al 3 de
 sept— y econoar tocó **50 tokens distintos y solo cerró 5 operaciones**: casi
 todo sigue abierto. `tools/score.js` se niega a puntuar con menos de 30
-cerradas, así que **todavía no hay un puntaje real**, y está bien que sea así.
+cerradas, así que **todavía no había un puntaje real** con ese primer export.
 
-De esas 5, igual hay una señal para tener en cuenta: 80% de aciertos pero
+De esas 5, igual había una señal para tener en cuenta: 80% de aciertos pero
 **94% de la ganancia concentrada en 3 operaciones** — exactamente el patrón
-que `edgeScore()` penaliza por "puede ser suerte, no habilidad". No sacar
-conclusiones todavía con esta muestra.
+que `edgeScore()` penaliza por "puede ser suerte, no habilidad". Con más
+muestra (ver punto 9) se confirmó que era ruido, no señal: el cuadro se dio
+vuelta del todo.
+
+**9. Segundo export (554 registros, 39 operaciones cerradas, 28 ago – 3 sept)
+— primer puntaje real, y es malo.**
+
+Con volumen de verdad (315 swaps clasificados, 39 episodios cerrados, ya
+supera el mínimo de 30) econoar da:
+
+| | |
+|---|---|
+| Resultado neto | **-$43.689** |
+| Aciertos | 26% |
+| Top-3 del PnL | 62% (ni sus mejores 3 tapan el agujero) |
+| Drawdown | 194% de lo que llegó a ganar |
+| EDGE | **6 / 100** — expectativa neta negativa |
+| Copiabilidad | 100 / 100 — entra escalonado, tenencia larga, fácil de seguir |
+| **PUNTAJE FINAL** | **6 / 100** |
+
+Verificado episodio por episodio (no es un outlier rompiendo el promedio):
+gastó $176.865 en total, cobró $133.176. La pérdida está distribuida en
+varias posiciones grandes, no concentrada en una sola falla puntual.
+
+La copiabilidad alta no salva nada acá: es fácil de copiar, pero lo que hay
+para copiar es una pérdida. **Con esta muestra, econoar no es un trader para
+seguir** — al menos no en esta ventana de una semana. Falta correr el mismo
+análisis con los otros 2-3 traders para poder comparar.
+
+**Auditoría del número, antes de confiar en él** (no es un bug):
+- Episodio por episodio: gastó $176.865 en total, cobró $133.176 — la suma
+  cuadra exacto con el neto, no es un outlier de un solo registro roto.
+- El export trajo también 7 `transfers` (depósitos de tokens, no swaps) que
+  `episodesFromSwaps()` no ve. Solo uno se solapa con un episodio cerrado, y
+  ese dio ganancia ($1.424) parcialmente con tokens que le llegaron gratis
+  por transfer, no comprados — si algo, esto hace que el -$43.689 sea
+  **generoso** con econoar, no exagerado.
+- Ningún swap clasificado tiene `humanUsdAmountIn`/`Out` en cero o nulo, ni
+  hay outliers de escala rara (>$50.000 en un solo swap). Los datos están
+  limpios.
 
 **Dato nuevo:** econoar no opera solo en Solana. Aparecieron swaps con
 `inNetworkId`/`outNetworkId` = 8453 (Base) y 56 (BSC), vía USDC de Solana como

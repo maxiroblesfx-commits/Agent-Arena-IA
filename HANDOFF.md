@@ -17,7 +17,7 @@ en que varios coinciden**— y poder actuar de un click desde el celular.
 
 - **GitHub:** `maxiroblesfx-commits/Agent-Arena-IA`
 - **Rama:** `claude/agent-arena-ia-continue-65p45l` (todo el trabajo está ahí; `main` está vacío)
-- Node, sin dependencias. `node --test` → 62 tests, todos pasan.
+- Node, sin dependencias. `node --test` → 64 tests, todos pasan.
 - Leé el **README** completo antes de tocar nada: tiene el mapa de la API y el
   estado actual.
 
@@ -124,31 +124,61 @@ El userId de econoar es `c573ebfa-5e98-580c-ae15-c8672f11c151`.
 | `tools/browser/find-wallet.js` | Snippet de consola: saca addresses y endpoints del navegador |
 | `tools/browser/export-swaps.js` | Snippet de consola: exporta el historial de operaciones |
 | `lib/fomoSwaps.js` | Normaliza un swap crudo de FOMO (USDC↔token vía RELAY) a episodios |
+| `tools/scoreFomo.js` | CLI: `node tools/scoreFomo.js swaps.json` — filtra, normaliza y puntúa de una |
 | `dist/scout.js` | Todo el scout en un archivo, sin instalar nada |
 
 Los snippets de `tools/browser/` van en la **consola del navegador** (F12) estando
 en el perfil de FOMO. Todo lo que empieza con `node` va en PowerShell.
 
+**8. Primer export real corrido (194 registros, 2026-09-03) — sin puntaje
+todavía, y por qué.**
+
+`exportar()` trae TODO lo que la app llamó mientras se navegaba, no solo
+swaps: de 194 registros, 93 eran en realidad de `/balances` (posiciones
+abiertas) mezclados en el mismo array. `tools/scoreFomo.js` los separa por
+forma (¿tiene `inTokenAddress` + `outTokenAddress` en la raíz?) y avisa
+cuántos descartó.
+
+De los 101 swaps reales, los 101 se pudieron clasificar (ninguno cayó en
+token↔token sin stable de por medio). Pero la ventana era corta —1 al 3 de
+sept— y econoar tocó **50 tokens distintos y solo cerró 5 operaciones**: casi
+todo sigue abierto. `tools/score.js` se niega a puntuar con menos de 30
+cerradas, así que **todavía no hay un puntaje real**, y está bien que sea así.
+
+De esas 5, igual hay una señal para tener en cuenta: 80% de aciertos pero
+**94% de la ganancia concentrada en 3 operaciones** — exactamente el patrón
+que `edgeScore()` penaliza por "puede ser suerte, no habilidad". No sacar
+conclusiones todavía con esta muestra.
+
+**Dato nuevo:** econoar no opera solo en Solana. Aparecieron swaps con
+`inNetworkId`/`outNetworkId` = 8453 (Base) y 56 (BSC), vía USDC de Solana como
+puente (provider `RELAY`, también aparecieron `JUPITER`, `DFLOW`, `OKX`). Esas
+patas usan una **wallet EVM distinta** (`0x300b798feb4c06c6aea12bc5d37ab8d32ebeb429`)
+que aparece como `address` en esos registros y como `recipient` en las patas
+Solana — mismo trader, wallet distinta según la cadena del lado que ejecuta.
+El normalizador no depende del campo `address`, así que esto no rompe nada,
+pero quedó anotado por si hace falta más adelante.
+
 ## El próximo paso concreto
 
-Ya está confirmado que la cadena no sirve (punto 5) y ya está el normalizador
-(`lib/fomoSwaps.js`, punto 7) probado con 2 swaps reales. Falta volumen:
+Ya está: la cadena no sirve (punto 5), el normalizador (`lib/fomoSwaps.js`,
+puntos 7-8) probado con datos reales, y `tools/scoreFomo.js` para correr todo
+el flujo de una vez (`node tools/scoreFomo.js swaps.json`). Falta volumen:
 
-1. Correr `tools/browser/export-swaps.js` → `exportar()` en el perfil de
-   econoar para bajar su historial completo (se necesitan ≥30 operaciones
-   cerradas — `tools/score.js` se niega a puntuar con menos).
-2. Pasar ese export por `lib/fomoSwaps.js` → `episodesFromSwaps()` de
-   `tools/score.js` y correr `edgeScore`/`copyScore` con datos reales.
-3. Ojo con los swaps que `normalize()` devuelve `null` (token↔token, o
-   ninguna pata en USDC/USDT): contarlos y decir cuántos quedaron afuera, no
-   descartarlos en silencio — si son muchos, el normalizador está incompleto
-   y hay que mirar esos casos antes de confiar en el puntaje.
+1. Correr `tools/browser/export-swaps.js` → `exportar()` de nuevo más
+   adelante (unos días/semanas después) para juntar más historial y más
+   operaciones **cerradas** — no alcanza con más días de swaps si siguen
+   siendo posiciones abiertas.
+2. Correr `node tools/scoreFomo.js <export>.json`. Con ≥30 cerradas ya da
+   EDGE, COPIABILIDAD y el puntaje final.
+3. Repetir con los otros 2-3 traders que seguís, para poder rankearlos entre
+   sí — hoy solo hay datos de econoar.
 
 Nota de entorno: si algún día seguís esto desde un sandbox con red
 restringida (como esta sesión), `fomo.family`, `prod-api.fomo.family` y
 cualquier RPC/explorer de Solana pueden estar bloqueados por política de
 egress — no es un bug del código, hay que conseguir los datos desde afuera
-(navegador logueado) y pegarlos.
+(navegador logueado) y pegarlos o subirlas como archivo.
 
 ## Cómo quiero que trabajes
 

@@ -17,7 +17,7 @@ en que varios coinciden**— y poder actuar de un click desde el celular.
 
 - **GitHub:** `maxiroblesfx-commits/Agent-Arena-IA`
 - **Rama:** `claude/agent-arena-ia-continue-65p45l` (todo el trabajo está ahí; `main` está vacío)
-- Node, sin dependencias. `node --test` → 75 tests, todos pasan.
+- Node, sin dependencias. `node --test` → 81 tests, todos pasan.
 - Leé el **README** completo antes de tocar nada: tiene el mapa de la API y el
   estado actual.
 
@@ -126,6 +126,7 @@ El userId de econoar es `c573ebfa-5e98-580c-ae15-c8672f11c151`.
 | `lib/fomoSwaps.js` | Normaliza un swap crudo de FOMO (USDC↔token vía RELAY) a episodios |
 | `tools/scoreFomo.js` | CLI: `node tools/scoreFomo.js swaps.json` — filtra, normaliza y puntúa de una |
 | `lib/tape.js` | Lee el tape: compras/ventas, hitos de ganancia y tesis, cada uno por separado |
+| `lib/positions.js` | Reconstruye el market cap de entrada de las posiciones abiertas |
 | `tools/learn.js` | CLI: `node tools/learn.js tape.json` — describe qué termina mal y qué no |
 | `tools/browser/watch-tape.js` | Snippet de consola: captura el tape con el tiempo (sobrevive recargas) |
 | `dist/scout.js` | Todo el scout en un archivo, sin instalar nada |
@@ -240,9 +241,15 @@ entre lo que este grupo ya elige.
 Lo más urgente es **empezar a capturar el tape**, porque es el único dato que
 se pierde para siempre si no se guarda hoy (punto 10):
 
-1. Abrir `fomo.family`, F12 → Console, pegar `tools/browser/watch-tape.js` y
-   **dejar la pestaña abierta**. Sobrevive recargas (guarda en localStorage).
-   Cuando quieras: `estado()` para ver cuánto lleva, `exportar()` para bajarlo.
+1. **No hace falta capturar 24/7.** `lib/positions.js` reconstruye el market
+   cap de entrada de cada posición abierta desde un solo export de
+   `/balances`: `mcap_ahora × (precio_entrada / precio_ahora)`. Validado con
+   stablecoins (USDC da −0%, que es lo que tiene que dar). Alcanza con correr
+   `export-swaps.js` cada tanto.
+2. El tape (`watch-tape.js`) sigue siendo mejor —da el mcap exacto al operar,
+   y de todos los traders— pero exige la PC prendida y la sesión abierta.
+   El endpoint NO es público: da 401 sin login, así que no se puede automatizar
+   sin meter un token de la cuenta en algún lado, y eso no vale la pena.
 2. `node tools/learn.js tape.json` (acepta varios archivos y los une
    deduplicando, así el dataset crece export tras export).
 3. Lo que hay que esperar: al principio va a decir **0 operaciones cerradas**,

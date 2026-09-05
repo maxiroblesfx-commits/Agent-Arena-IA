@@ -14,8 +14,23 @@
 
 const fs = require("fs");
 const tape = require("../lib/tape");
+const positions = require("../lib/positions");
 
 const MIN_GRUPO = 10;    // debajo de esto un grupo no se describe: no alcanza
+
+/** Clave para deduplicar al unir varios exports.
+ *
+ *  Los eventos del tape traen `id`. Los registros de /balances NO, y sus
+ *  primeros caracteres son idénticos entre sí (mismo __ruta, misma __url):
+ *  cortar el JSON para armar la clave los colapsaba todos en uno — 87
+ *  posiciones se leían como 1. Por eso, sin `id`, la clave es el JSON entero.
+ */
+function clave(item) {
+  if (item && item.id) return "id:" + item.id;
+  const mint = item && item.balance && item.balance.tokenAddress;
+  if (mint) return `bal:${(item.__url || "")}|${mint}`;
+  return "raw:" + JSON.stringify(item);
+}
 
 function cargar(paths) {
   const porId = new Map();
@@ -26,12 +41,12 @@ function cargar(paths) {
     if (!Array.isArray(raw)) throw new Error(`${p}: se esperaba un array`);
     for (const item of raw) {
       leidos++;
-      const k = (item && item.id) || JSON.stringify(item).slice(0, 120);
-      if (!porId.has(k)) porId.set(k, item);
+      if (!porId.has(clave(item))) porId.set(clave(item), item);
     }
   }
   const { swaps, milestones, theses, otros } = tape.clasificar([...porId.values()]);
-  return { obs: swaps, milestones, theses, leidos, sinForma: otros.length };
+  const abiertas = positions.snapshot(otros);
+  return { obs: swaps, milestones, theses, abiertas, leidos, sinForma: otros.length - abiertas.filas.length };
 }
 
 function pct(x) { return x === null ? "—" : (x * 100).toFixed(1) + "%"; }
@@ -109,6 +124,29 @@ function reportarTesis(ts) {
   }
 }
 
+/** Las posiciones abiertas: foto de entrada sin haber tenido que capturar en
+ *  vivo. El retorno de acá es NO REALIZADO y hay que decirlo cada vez. */
+function reportarAbiertas(snap) {
+  if (!snap.filas.length) return;
+  const f = snap.filas;
+  console.log(`\n${"═".repeat(76)}`);
+  console.log(`POSICIONES ABIERTAS (${f.length}) — foto de entrada reconstruida`);
+  console.log(`El market cap de entrada sale de mcap_ahora × (precio_entrada / precio_ahora).`);
+  console.log(`Es aproximado: asume que el supply no cambió.`);
+  if (snap.descartados) console.log(`${snap.descartados} sin precio de entrada utilizable, quedaron afuera.`);
+
+  const ganando = f.filter((x) => x.retornoNoRealizado > 0).length;
+  console.log(`\n  ${ganando} en ganancia · ${f.length - ganando} en pérdida  ← NO REALIZADO`);
+  console.log(`  Ojo con leer esto como habilidad: una posición perdedora no cuenta como`);
+  console.log(`  pérdida mientras no se cierre. econoar tiene el libro abierto en ganancia`);
+  console.log(`  y sin embargo realizó -$43.689 en la misma ventana.`);
+  console.log(`  Capital comprometido: ${usd(f.reduce((s, x) => s + x.costo, 0))}`);
+
+  tabla("  Posiciones por market cap AL ENTRAR:", tape.porGrupo(
+    f.map((x) => ({ ...x, net: x.costo * x.retornoNoRealizado, marketCapEntrada: x.mcapEntrada, gastado: x.costo, retorno: x.retornoNoRealizado, holdMs: x.holdMs })),
+    (v) => tape.banda(v.marketCapEntrada)));
+}
+
 function main() {
   const paths = process.argv.slice(2);
   if (!paths.length) {
@@ -116,15 +154,17 @@ function main() {
     process.exit(1);
   }
 
-  const { obs, milestones, theses, leidos, sinForma } = cargar(paths);
+  const { obs, milestones, theses, abiertas, leidos, sinForma } = cargar(paths);
   console.log(`${leidos} registros leídos de ${paths.length} archivo(s)`);
-  console.log(`${obs.length} compras/ventas · ${milestones.length} hitos de ganancia · ${theses.length} tesis · ${sinForma} sin reconocer`);
+  console.log(`${obs.length} compras/ventas · ${milestones.length} hitos de ganancia · ${theses.length} tesis · ${abiertas.filas.length} posiciones abiertas · ${sinForma} sin reconocer`);
 
-  if (!obs.length && !milestones.length && !theses.length) {
-    console.log("\nNo hay ni un evento del tape acá. ¿El export salió de tools/browser/watch-tape.js?");
+  if (!obs.length && !milestones.length && !theses.length && !abiertas.filas.length) {
+    console.log("\nNo hay nada reconocible acá. ¿El export salió de tools/browser/watch-tape.js");
+    console.log("o de tools/browser/export-swaps.js?");
     return;
   }
 
+  reportarAbiertas(abiertas);
   reportarMilestones(milestones);
   reportarTesis(theses);
 
@@ -178,4 +218,4 @@ function main() {
 }
 
 if (require.main === module) main();
-module.exports = { cargar, MIN_GRUPO };
+module.exports = { cargar, clave, MIN_GRUPO };

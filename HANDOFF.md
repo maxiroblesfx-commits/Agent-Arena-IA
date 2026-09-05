@@ -17,7 +17,7 @@ en que varios coinciden**— y poder actuar de un click desde el celular.
 
 - **GitHub:** `maxiroblesfx-commits/Agent-Arena-IA`
 - **Rama:** `claude/agent-arena-ia-continue-65p45l` (todo el trabajo está ahí; `main` está vacío)
-- Node, sin dependencias. `node --test` → 64 tests, todos pasan.
+- Node, sin dependencias. `node --test` → 75 tests, todos pasan.
 - Leé el **README** completo antes de tocar nada: tiene el mapa de la API y el
   estado actual.
 
@@ -125,6 +125,9 @@ El userId de econoar es `c573ebfa-5e98-580c-ae15-c8672f11c151`.
 | `tools/browser/export-swaps.js` | Snippet de consola: exporta el historial de operaciones |
 | `lib/fomoSwaps.js` | Normaliza un swap crudo de FOMO (USDC↔token vía RELAY) a episodios |
 | `tools/scoreFomo.js` | CLI: `node tools/scoreFomo.js swaps.json` — filtra, normaliza y puntúa de una |
+| `lib/tape.js` | Lee el tape: compras/ventas, hitos de ganancia y tesis, cada uno por separado |
+| `tools/learn.js` | CLI: `node tools/learn.js tape.json` — describe qué termina mal y qué no |
+| `tools/browser/watch-tape.js` | Snippet de consola: captura el tape con el tiempo (sobrevive recargas) |
 | `dist/scout.js` | Todo el scout en un archivo, sin instalar nada |
 
 Los snippets de `tools/browser/` van en la **consola del navegador** (F12) estando
@@ -197,20 +200,58 @@ Solana — mismo trader, wallet distinta según la cadena del lado que ejecuta.
 El normalizador no depende del campo `address`, así que esto no rompe nada,
 pero quedó anotado por si hace falta más adelante.
 
+**10. La metadata del token es EFÍMERA, y esto define toda la estrategia de
+datos.**
+
+Para saber "por qué un token salió mal" hace falta saber cómo era cuando lo
+compraron: market cap, volumen, edad. Ese dato está en `/balances`... pero
+`/balances` solo devuelve lo que el trader tiene **abierto ahora**. Cuando la
+posición cierra, la característica desaparece de la API.
+
+Comprobado: de las **39 operaciones cerradas de econoar, 0 conservan
+metadata**; de los 93 tokens con metadata, ninguno tiene resultado todavía.
+Resultado y característica están en conjuntos **disjuntos**. Con solo exports
+de perfil no se puede aprender nada, y cada día sin capturar pierde datos que
+no se recuperan.
+
+**11. El tape (`/feed/tradingActivity`) resuelve eso, y trae cuatro tipos de
+evento.** Cada uno da algo distinto:
+
+| Tipo | Qué trae | Sirve para |
+|---|---|---|
+| `swap_buy` / `swap_sell` | `usdAmount`, `price`, `marketCap`, `fdv`, quién, cuándo | **La única pista sin sesgo**: muestra compras y ventas, salgan bien o mal |
+| `user_trade_profit_milestone` | `entryTime`, `totalCostBasis`, `totalPnlUsd`, `totalPercentagePnl`, mcap/fdv/price | Ejemplo ya etiquetado, sin emparejar nada — **pero solo ganadores** |
+| `thesis` | Texto de convicción + `usdValue`, `unrealizedPnlUsd`, `closedAt`, likes | La confluencia: quién declara convicción en qué, con su posición real |
+
+**El sesgo que hay que tener presente siempre:** el feed publica hitos de
+*ganancia*, nunca de pérdida. Un dataset armado solo con milestones enseña
+cómo se ven los ganadores sin haber visto jamás un perdedor — el error de
+supervivencia de manual, y la razón por la que `tools/learn.js` los reporta
+en una sección aparte con la advertencia adelante. Solo `swap_buy`/`swap_sell`
+ve las dos caras.
+
+Y un límite de fondo que no se arregla con más datos: el tape solo muestra lo
+que la gente **compró**. No hay contrafáctico de los tokens que ignoraron y
+volaron, así que esto no puede enseñar a elegir en abstracto — solo a comparar
+entre lo que este grupo ya elige.
+
 ## El próximo paso concreto
 
-Ya está: la cadena no sirve (punto 5), el normalizador (`lib/fomoSwaps.js`,
-puntos 7-8) probado con datos reales, y `tools/scoreFomo.js` para correr todo
-el flujo de una vez (`node tools/scoreFomo.js swaps.json`). Falta volumen:
+Lo más urgente es **empezar a capturar el tape**, porque es el único dato que
+se pierde para siempre si no se guarda hoy (punto 10):
 
-1. Correr `tools/browser/export-swaps.js` → `exportar()` de nuevo más
-   adelante (unos días/semanas después) para juntar más historial y más
-   operaciones **cerradas** — no alcanza con más días de swaps si siguen
-   siendo posiciones abiertas.
-2. Correr `node tools/scoreFomo.js <export>.json`. Con ≥30 cerradas ya da
-   EDGE, COPIABILIDAD y el puntaje final.
-3. Repetir con los otros 2-3 traders que seguís, para poder rankearlos entre
-   sí — hoy solo hay datos de econoar.
+1. Abrir `fomo.family`, F12 → Console, pegar `tools/browser/watch-tape.js` y
+   **dejar la pestaña abierta**. Sobrevive recargas (guarda en localStorage).
+   Cuando quieras: `estado()` para ver cuánto lleva, `exportar()` para bajarlo.
+2. `node tools/learn.js tape.json` (acepta varios archivos y los une
+   deduplicando, así el dataset crece export tras export).
+3. Lo que hay que esperar: al principio va a decir **0 operaciones cerradas**,
+   porque hace falta ver la compra Y la venta del mismo par (trader, token).
+   Eso no es un error, es el costo de arrancar. Con días de captura empiezan a
+   cerrarse.
+4. En paralelo, seguir con `tools/browser/export-swaps.js` +
+   `node tools/scoreFomo.js` para los otros 2-3 traders, para poder rankearlos
+   — hoy solo hay datos de econoar (y da 6/100).
 
 Nota de entorno: si algún día seguís esto desde un sandbox con red
 restringida (como esta sesión), `fomo.family`, `prod-api.fomo.family` y

@@ -17,7 +17,7 @@ en que varios coinciden**— y poder actuar de un click desde el celular.
 
 - **GitHub:** `maxiroblesfx-commits/Agent-Arena-IA`
 - **Rama:** `claude/agent-arena-ia-continue-65p45l` (todo el trabajo está ahí; `main` está vacío)
-- Node, sin dependencias. `node --test` → 81 tests, todos pasan.
+- Node, sin dependencias. `node --test` → 84 tests, todos pasan.
 - Leé el **README** completo antes de tocar nada: tiene el mapa de la API y el
   estado actual.
 
@@ -124,7 +124,7 @@ El userId de econoar es `c573ebfa-5e98-580c-ae15-c8672f11c151`.
 | `tools/browser/find-wallet.js` | Snippet de consola: saca addresses y endpoints del navegador |
 | `tools/browser/export-swaps.js` | Snippet de consola: exporta el historial de operaciones |
 | `lib/fomoSwaps.js` | Normaliza un swap crudo de FOMO (USDC↔token vía RELAY) a episodios |
-| `tools/scoreFomo.js` | CLI: `node tools/scoreFomo.js swaps.json` — filtra, normaliza y puntúa de una |
+| `tools/scoreFomo.js` | CLI: `node tools/scoreFomo.js swaps.json` — agrupa por trader, puntúa y rankea |
 | `lib/tape.js` | Lee el tape: compras/ventas, hitos de ganancia y tesis, cada uno por separado |
 | `lib/positions.js` | Reconstruye el market cap de entrada de las posiciones abiertas |
 | `tools/learn.js` | CLI: `node tools/learn.js tape.json` — describe qué termina mal y qué no |
